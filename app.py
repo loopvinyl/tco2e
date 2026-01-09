@@ -746,7 +746,7 @@ with tab1:
             key="lote_residuos"
         )
         
-        st.subheader("📊 Parâmetros Ambientais")
+        st.subheader("📊 Parámetros Ambientais")
         
         umidade_valor = st.slider(
             "Umidade do resíduo (%)", 
@@ -766,8 +766,8 @@ with tab1:
         st.subheader("⏰ Período de Análise")
         dias_simulacao = st.slider(
             "Dias de simulação", 
-            50, 1000, 365, 50,
-            help="Período total da simulação em dias",
+            50, 3650, 365, 50,
+            help="Período total da simulação em dias (até 10 anos)",
             key="dias_lote"
         )
         
@@ -948,11 +948,219 @@ with tab1:
             plt.tight_layout()
             st.pyplot(fig)
             
+            # =============================================================================
+            # NOVA SEÇÃO: DURAÇÃO DAS EMISSÕES - COMPARAÇÃO TEMPORAL CRÍTICA
+            # =============================================================================
+            
+            st.header("⏰ Duração das Emissões: Diferença Crucial entre Cenários")
+            
+            # Criar DataFrame temporal para análise
+            df_temporal = pd.DataFrame({
+                'Dia': np.arange(1, dias_simulacao + 1),
+                'Aterro_CH4_kg_dia': emissoes_aterro,
+                'Vermicompostagem_CH4_kg_dia': emissoes_vermi,
+                'Compostagem_CH4_kg_dia': emissoes_compost
+            })
+            
+            # Calcular acumulados e percentuais
+            df_temporal['Aterro_Acumulado'] = df_temporal['Aterro_CH4_kg_dia'].cumsum()
+            df_temporal['Vermi_Acumulado'] = df_temporal['Vermicompostagem_CH4_kg_dia'].cumsum()
+            df_temporal['Compost_Acumulado'] = df_temporal['Compostagem_CH4_kg_dia'].cumsum()
+            
+            # Calcular percentuais acumulados
+            for cenario in ['Aterro', 'Vermi', 'Compost']:
+                total = df_temporal[f'{cenario}_Acumulado'].iloc[-1]
+                df_temporal[f'{cenario}_%_Acumulado'] = (df_temporal[f'{cenario}_Acumulado'] / total * 100) if total > 0 else 0
+            
+            # Encontrar dias para atingir certos percentuais
+            resultados_temporais = []
+            
+            for cenario in ['Aterro', 'Vermi', 'Compost']:
+                dados = {
+                    'Cenário': cenario,
+                    'Total_kg': df_temporal[f'{cenario}_Acumulado'].iloc[-1],
+                }
+                
+                # Encontrar dia para 50%, 90%, 95% e 99% das emissões
+                for percentual in [50, 90, 95, 99]:
+                    try:
+                        dia = df_temporal[df_temporal[f'{cenario}_%_Acumulado'] >= percentual]['Dia'].iloc[0]
+                        dados[f'Dia_{percentual}%'] = dia
+                    except:
+                        dados[f'Dia_{percentual}%'] = dias_simulacao
+                
+                resultados_temporais.append(dados)
+            
+            # Criar DataFrame de resultados
+            df_resultados_temp = pd.DataFrame(resultados_temporais)
+            
+            # Exibir métricas comparativas
+            st.subheader("📊 Duração Temporal das Emissões")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                anos_aterro_95 = df_resultados_temp.loc[0, 'Dia_95%'] / 365
+                st.metric(
+                    "Aterro Sanitário",
+                    f"{int(anos_aterro_95)} anos",
+                    f"{df_resultados_temp.loc[0, 'Dia_95%']} dias para 95%",
+                    help=f"Emite metano por {int(df_resultados_temp.loc[0, 'Dia_99%']/365)} anos até atingir 99%"
+                )
+            
+            with col2:
+                st.metric(
+                    "Vermicompostagem",
+                    "50 dias",
+                    "Processo completo",
+                    help="Todas as emissões ocorrem em apenas 50 dias"
+                )
+            
+            with col3:
+                st.metric(
+                    "Compostagem Termofílica",
+                    "50 dias",
+                    "Processo completo",
+                    help="Todas as emissões ocorrem em apenas 50 dias"
+                )
+            
+            # Gráfico comparativo temporal
+            st.subheader("📈 Comparação Temporal: Emissões Concentradas vs Prolongadas")
+            
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+            
+            # Primeiro gráfico: Emissões diárias (escala linear)
+            dias_visao = min(500, dias_simulacao)  # Mostrar até 500 dias
+            
+            ax1.plot(df_temporal['Dia'][:dias_visao], df_temporal['Aterro_CH4_kg_dia'][:dias_visao], 
+                    'r-', label='Aterro', linewidth=1.5, alpha=0.7)
+            ax1.plot(df_temporal['Dia'][:dias_visao], df_temporal['Vermicompostagem_CH4_kg_dia'][:dias_visao], 
+                    'g-', label='Vermicompostagem', linewidth=1.5, alpha=0.7)
+            ax1.plot(df_temporal['Dia'][:dias_visao], df_temporal['Compostagem_CH4_kg_dia'][:dias_visao], 
+                    'b-', label='Compostagem', linewidth=1.5, alpha=0.7)
+            
+            # Destacar área dos primeiros 50 dias
+            ax1.axvspan(0, 50, alpha=0.1, color='green', label='Processos Biológicos (0-50 dias)')
+            ax1.axvline(x=50, color='black', linestyle='--', alpha=0.5, linewidth=0.8)
+            
+            ax1.set_xlabel('Dias')
+            ax1.set_ylabel('Emissão Diária (kg CH₄/dia)')
+            ax1.set_title('COMPARAÇÃO TEMPORAL: Aterro (Anos) vs Compostagem/Vermicompostagem (50 Dias)',
+                         fontsize=14, fontweight='bold')
+            ax1.legend(loc='upper right')
+            ax1.grid(True, linestyle='--', alpha=0.3)
+            ax1.set_xlim([0, dias_visao])
+            
+            # Segundo gráfico: Percentual acumulado
+            ax2.plot(df_temporal['Dia'][:dias_visao], df_temporal['Aterro_%_Acumulado'][:dias_visao], 
+                    'r-', label='Aterro', linewidth=2)
+            ax2.plot(df_temporal['Dia'][:dias_visao], df_temporal['Vermi_%_Acumulado'][:dias_visao], 
+                    'g-', label='Vermicompostagem', linewidth=2)
+            ax2.plot(df_temporal['Dia'][:dias_visao], df_temporal['Compost_%_Acumulado'][:dias_visao], 
+                    'b-', label='Compostagem', linewidth=2)
+            
+            # Linhas de referência
+            for percentual in [50, 90, 95, 99]:
+                ax2.axhline(y=percentual, color='gray', linestyle=':', alpha=0.3, linewidth=0.8)
+            
+            # Marcar 50 dias
+            ax2.axvline(x=50, color='black', linestyle='--', alpha=0.5, linewidth=1)
+            ax2.text(50, 50, ' 50 dias', rotation=90, verticalalignment='center', fontsize=9)
+            
+            ax2.set_xlabel('Dias')
+            ax2.set_ylabel('Percentual Acumulado (%)')
+            ax2.set_title('Percentual de Emissões Acumulado ao Longo do Tempo',
+                         fontsize=14, fontweight='bold')
+            ax2.legend(loc='lower right')
+            ax2.grid(True, linestyle='--', alpha=0.3)
+            ax2.set_xlim([0, dias_visao])
+            ax2.set_ylim([0, 100])
+            
+            plt.tight_layout()
+            st.pyplot(fig)
+            
+            # Tabela detalhada de tempos
+            st.subheader("📋 Tabela Detalhada: Tempo para Emitir Percentuais das Emissões")
+            
+            # Criar DataFrame formatado
+            df_tempos = pd.DataFrame({
+                'Cenário': ['Aterro Sanitário', 'Vermicompostagem', 'Compostagem Termofílica'],
+                '50% das emissões': [
+                    f"{df_resultados_temp.loc[0, 'Dia_50%']} dias ({formatar_br(df_resultados_temp.loc[0, 'Dia_50%']/365)} anos)",
+                    f"{df_resultados_temp.loc[1, 'Dia_50%']} dias",
+                    f"{df_resultados_temp.loc[2, 'Dia_50%']} dias"
+                ],
+                '90% das emissões': [
+                    f"{df_resultados_temp.loc[0, 'Dia_90%']} dias ({formatar_br(df_resultados_temp.loc[0, 'Dia_90%']/365)} anos)",
+                    f"{df_resultados_temp.loc[1, 'Dia_90%']} dias",
+                    f"{df_resultados_temp.loc[2, 'Dia_90%']} dias"
+                ],
+                '95% das emissões': [
+                    f"{df_resultados_temp.loc[0, 'Dia_95%']} dias ({formatar_br(df_resultados_temp.loc[0, 'Dia_95%']/365)} anos)",
+                    f"{df_resultados_temp.loc[1, 'Dia_95%']} dias",
+                    f"{df_resultados_temp.loc[2, 'Dia_95%']} dias"
+                ],
+                '99% das emissões': [
+                    f"{df_resultados_temp.loc[0, 'Dia_99%']} dias ({formatar_br(df_resultados_temp.loc[0, 'Dia_99%']/365)} anos)",
+                    f"{df_resultados_temp.loc[1, 'Dia_99%']} dias",
+                    f"{df_resultados_temp.loc[2, 'Dia_99%']} dias"
+                ]
+            })
+            
+            st.dataframe(df_tempos, use_container_width=True)
+            
+            # Explicação sobre a importância da diferença temporal
+            with st.expander("🎯 POR QUE ESTA DIFERENÇA TEMPORAL É CRÍTICA?"):
+                st.markdown(f"""
+                **⚠️ DIFERENÇA FUNDAMENTAL ENTRE OS PROCESSOS:**
+                
+                ### 🕰️ **ATERRO SANITÁRIO:**
+                - **Duração:** {int(anos_aterro_95)} **ANOS** para 95% das emissões
+                - **Padrão:** Emissões prolongadas por décadas (decaimento exponencial lento)
+                - **Pico:** Baixo e estendido ao longo do tempo
+                - **Impacto climático:** Persistente e de longo prazo
+                - **Controle:** **QUASE IMPOSSÍVEL** - emissões dispersas no tempo e espaço
+                
+                ### 🪱 **VERMICOMPOSTAGEM:**
+                - **Duração:** **50 DIAS** para todas as emissões
+                - **Padrão:** Emissões concentradas em processo controlado
+                - **Pico:** Alto nas primeiras 2-3 semanas
+                - **Impacto climático:** Imediato e de curta duração
+                - **Controle:** **FÁCIL** - emissões em reator fechado e período definido
+                
+                ### 🌡️ **COMPOSTAGEM TERMOFÍLICA:**
+                - **Duração:** **50 DIAS** para todas as emissões
+                - **Padrão:** Emissões concentradas com pico termofílico
+                - **Pico:** Muito alto na fase termofílica (dias 6-15)
+                - **Impacto climático:** Imediato e de curta duração
+                - **Controle:** **MUITO FÁCIL** - emissões em reator com captura possível
+                
+                ### 💡 **IMPLICAÇÕES PRÁTICAS IMPORTANTES:**
+                
+                1. **CAPTURA DE METANO:**
+                   - **Aterro:** Complexa, cara e ineficiente (emissões por anos)
+                   - **Compostagem:** Viável economicamente (emissões em 50 dias)
+                
+                2. **MONITORAMENTO:**
+                   - **Aterro:** Necessário por décadas, alto custo
+                   - **Compostagem:** Apenas 50 dias, baixo custo
+                
+                3. **CRÉDITOS DE CARBONO:**
+                   - **Aterro:** Incerteza nas emissões futuras
+                   - **Compostagem:** Certeza nas emissões evitadas
+                
+                4. **INVESTIMENTO EM TECNOLOGIA:**
+                   - **Aterro:** Sistemas complexos para captura prolongada
+                   - **Compostagem:** Reatores simples com captura no pico
+                
+                **📊 CONCLUSÃO:** A compostagem/vermicompostagem NÃO SÓ emitem MENOS metano, mas também concentram as emissões em um período MUITO CURTO (50 dias), permitindo captura e controle eficiente. O aterro, por outro lado, emite por ANOS, tornando praticamente impossível qualquer controle efetivo.
+                """)
+            
             # 6. CÁLCULO DE CO₂eq E VALOR FINANCEIRO
             st.header("💰 Valor Financeiro das Emissões Evitadas")
             
             # Converter metano para CO₂eq (GWP CH₄ = 27.9 para 100 anos - IPCC AR6)
-            GWP_CH4 = 27.9  # kg CO₂eq por kg CH₄
+            GWP_CH4 = 27.9  # kg CO₂eq per kg CH₄
             
             total_evitado_vermi_kg = (df['Aterro_Acumulado'].iloc[-1] - df['Vermi_Acumulado'].iloc[-1]) * GWP_CH4
             total_evitado_vermi_tco2eq = total_evitado_vermi_kg / 1000
@@ -984,6 +1192,19 @@ with tab1:
                     f"R$ {formatar_br(valor_compost_brl)}",
                     delta_color="off"
                 )
+            
+            # Resumo final
+            st.success(f"""
+            **🎯 RESUMO FINAL PARA LOTE DE {residuos_kg} kg:**
+            
+            **Aterro:** Emite **{formatar_br(df['Aterro_Acumulado'].iloc[-1])} kg CH₄** em **{dias_simulacao} dias** ({formatar_br(fracao_emitida*100)}% do potencial total)
+            
+            **Vermicompostagem:** Emite **{formatar_br(df['Vermi_Acumulado'].iloc[-1])} kg CH₄** em **apenas 50 dias** ({formatar_br((1 - df['Vermi_Acumulado'].iloc[-1]/df['Aterro_Acumulado'].iloc[-1])*100)}% de redução)
+            
+            **Compostagem:** Emite **{formatar_br(df['Compost_Acumulado'].iloc[-1])} kg CH₄** em **apenas 50 dias** ({formatar_br((1 - df['Compost_Acumulado'].iloc[-1]/df['Aterro_Acumulado'].iloc[-1])*100)}% de redução)
+            
+            **DIFERENÇA TEMPORAL CRÍTICA:** O aterro emite por **{int(anos_aterro_95)} anos**, enquanto compostagem emite por **50 dias**!
+            """)
     else:
         st.info("💡 Ajuste os parâmetros na barra lateral e clique em 'Calcular Potencial de Metano' para ver os resultados.")
 
