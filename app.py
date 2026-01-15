@@ -702,7 +702,7 @@ def executar_simulacao_unfccc(parametros, dias, residuos_kg_dia, massa_exposta_k
 # =============================================================================
 
 # Título do aplicativo
-st.title("Simulador de Emissões de tCO₂eq")
+st.title("Simulador de Emissões de tCO₂e")
 st.markdown("""
 Esta ferramenta projeta os Créditos de Carbono ao calcular as emissões de gases de efeito estufa para dois contextos de gestão de resíduos
 """)
