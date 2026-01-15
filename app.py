@@ -17,7 +17,7 @@ from SALib.analyze.sobol import analyze
 np.random.seed(50)  # Garante reprodutibilidade
 
 # Configurações iniciais
-st.set_page_config(page_title="Simulador de Emissões CO₂eq", layout="wide")
+st.set_page_config(page_title="Simulador de Emissões CO₂e", layout="wide")
 warnings.filterwarnings("ignore", category=FutureWarning)
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', None)
