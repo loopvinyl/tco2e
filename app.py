@@ -273,8 +273,6 @@ def inicializar_session_state():
         st.session_state.mostrar_atualizacao = False
     if 'cotacao_carregada' not in st.session_state:
         st.session_state.cotacao_carregada = False
-    if 'k_ano' not in st.session_state:
-        st.session_state.k_ano = 0.06  # Valor padrão
 
 # Chamar a inicialização
 inicializar_session_state()
@@ -365,13 +363,6 @@ with st.sidebar:
     h_exposta = st.slider("Horas expostas por dia", 4, 24, 8, 1,
                          help="Horas diárias de exposição dos resíduos")
     
-    # ADIÇÃO: Slider para taxa de decaimento (k)
-    st.subheader("📉 Parâmetros de Degradação do Aterro")
-    k_ano = st.slider("Taxa de Decaimento (k) [ano⁻¹]", 0.06, 0.40, 0.06, 0.01,
-                     help="Taxa de decaimento anual para a degradação dos resíduos no aterro")
-    st.session_state.k_ano = k_ano
-    st.write(f"**Taxa de decaimento selecionada:** {formatar_br(k_ano)} ano⁻¹")
-    
     st.subheader("🎯 Configuração de Simulação")
     anos_simulacao = st.slider("Anos de simulação", 5, 50, 20, 5,
                               help="Período total da simulação em anos")
@@ -395,8 +386,8 @@ F = 0.5  # Fração de metano no biogás
 OX = 0.1  # Fator de oxidação
 Ri = 0.0  # Metano recuperado
 
-# Constante de decaimento - AGORA VEM DO SLIDER (st.session_state.k_ano)
-k_ano = st.session_state.k_ano  # Constante de decaimento anual (ajustável)
+# Constante de decaimento (fixa como no script anexo)
+k_ano = 0.06  # Constante de decaimento anual
 
 # Vermicompostagem (Yang et al. 2017) - valores fixos
 TOC_YANG = 0.436  # Fração de carbono orgânico total
@@ -529,7 +520,7 @@ def calcular_emissoes_pre_descarte(O2_concentracao, dias_simulacao=dias):
 
     return emissoes_CH4_pre_descarte_kg, emissoes_N2O_pre_descarte_kg
 
-def calcular_emissoes_aterro(params, k_ano, dias_simulacao=dias):
+def calcular_emissoes_aterro(params, dias_simulacao=dias):
     umidade_val, temp_val, doc_val = params
 
     fator_umid = (1 - umidade_val) / (1 - 0.55)
@@ -602,10 +593,10 @@ def calcular_emissoes_compostagem(params, dias_simulacao=dias, dias_compostagem=
 
     return emissoes_CH4, emissoes_N2O
 
-def executar_simulacao_completa(parametros, k_ano):
+def executar_simulacao_completa(parametros):
     umidade, T, DOC = parametros
     
-    ch4_aterro, n2o_aterro = calcular_emissoes_aterro([umidade, T, DOC], k_ano)
+    ch4_aterro, n2o_aterro = calcular_emissoes_aterro([umidade, T, DOC])
     ch4_vermi, n2o_vermi = calcular_emissoes_vermi([umidade, T, DOC])
 
     total_aterro_tco2eq = (ch4_aterro * GWP_CH4_20 + n2o_aterro * GWP_N2O_20) / 1000
@@ -614,10 +605,10 @@ def executar_simulacao_completa(parametros, k_ano):
     reducao_tco2eq = total_aterro_tco2eq.sum() - total_vermi_tco2eq.sum()
     return reducao_tco2eq
 
-def executar_simulacao_unfccc(parametros, k_ano):
+def executar_simulacao_unfccc(parametros):
     umidade, T, DOC = parametros
 
-    ch4_aterro, n2o_aterro = calcular_emissoes_aterro([umidade, T, DOC], k_ano)
+    ch4_aterro, n2o_aterro = calcular_emissoes_aterro([umidade, T, DOC])
     total_aterro_tco2eq = (ch4_aterro * GWP_CH4_20 + n2o_aterro * GWP_N2O_20) / 1000
 
     ch4_compost, n2o_compost = calcular_emissoes_compostagem([umidade, T, DOC], dias_simulacao=dias, dias_compostagem=50)
@@ -635,11 +626,8 @@ if st.session_state.get('run_simulation', False):
     with st.spinner('Executando simulação...'):
         # Executar modelo base
         params_base = [umidade, T, DOC]
-        
-        # Usar k_ano da session state (do slider)
-        k_ano = st.session_state.k_ano
 
-        ch4_aterro_dia, n2o_aterro_dia = calcular_emissoes_aterro(params_base, k_ano)
+        ch4_aterro_dia, n2o_aterro_dia = calcular_emissoes_aterro(params_base)
         ch4_vermi_dia, n2o_vermi_dia = calcular_emissoes_vermi(params_base)
 
         # Construir DataFrame
@@ -708,9 +696,6 @@ if st.session_state.get('run_simulation', False):
 
         # Exibir resultados
         st.header("📈 Resultados da Simulação")
-        
-        # Informação sobre o k atual
-        st.info(f"**Taxa de decaimento (k) utilizada:** {formatar_br(k_ano)} ano⁻¹")
         
         # Obter valores totais
         total_evitado_tese = df['Reducao_tCO2eq_acum'].iloc[-1]
@@ -907,7 +892,7 @@ if st.session_state.get('run_simulation', False):
         ax.plot(df['Data'], df['Total_Vermi_tCO2eq_acum'], 'g-', label='Projeto (Compostagem em reatores com minhocas)', linewidth=2)
         ax.fill_between(df['Data'], df['Total_Vermi_tCO2eq_acum'], df['Total_Aterro_tCO2eq_acum'],
                         color='skyblue', alpha=0.5, label='Emissões Evitadas')
-        ax.set_title('Redução de Emissões em {} Anos (k = {} ano⁻¹)'.format(anos_simulacao, formatar_br(k_ano)))
+        ax.set_title('Redução de Emissões em {} Anos'.format(anos_simulacao))
         ax.set_xlabel('Ano')
         ax.set_ylabel('tCO₂eq Acumulado')
         ax.legend()
@@ -933,7 +918,7 @@ if st.session_state.get('run_simulation', False):
         }
 
         param_values_tese = sample(problem_tese, n_samples)
-        results_tese = Parallel(n_jobs=-1)(delayed(executar_simulacao_completa)(params, k_ano) for params in param_values_tese)
+        results_tese = Parallel(n_jobs=-1)(delayed(executar_simulacao_completa)(params) for params in param_values_tese)
         Si_tese = analyze(problem_tese, np.array(results_tese), print_to_console=False)
         
         sensibilidade_df_tese = pd.DataFrame({
@@ -967,7 +952,7 @@ if st.session_state.get('run_simulation', False):
         }
 
         param_values_unfccc = sample(problem_unfccc, n_samples)
-        results_unfccc = Parallel(n_jobs=-1)(delayed(executar_simulacao_unfccc)(params, k_ano) for params in param_values_unfccc)
+        results_unfccc = Parallel(n_jobs=-1)(delayed(executar_simulacao_unfccc)(params) for params in param_values_unfccc)
         Si_unfccc = analyze(problem_unfccc, np.array(results_unfccc), print_to_console=False)
         
         sensibilidade_df_unfccc = pd.DataFrame({
@@ -1002,7 +987,7 @@ if st.session_state.get('run_simulation', False):
         results_mc_tese = []
         for i in range(n_simulations):
             params_tese = [umidade_vals[i], temp_vals[i], doc_vals[i]]
-            results_mc_tese.append(executar_simulacao_completa(params_tese, k_ano))
+            results_mc_tese.append(executar_simulacao_completa(params_tese))
 
         results_array_tese = np.array(results_mc_tese)
         media_tese = np.mean(results_array_tese)
@@ -1013,7 +998,7 @@ if st.session_state.get('run_simulation', False):
         ax.axvline(media_tese, color='red', linestyle='--', label=f'Média: {formatar_br(media_tese)} tCO₂eq')
         ax.axvline(intervalo_95_tese[0], color='green', linestyle=':', label='IC 95%')
         ax.axvline(intervalo_95_tese[1], color='green', linestyle=':')
-        ax.set_title('Distribuição das Emissões Evitadas (Simulação Monte Carlo) - Proposta da Tese (k = {} ano⁻¹)'.format(formatar_br(k_ano)))
+        ax.set_title('Distribuição das Emissões Evitadas (Simulação Monte Carlo) - Proposta da Tese')
         ax.set_xlabel('Emissões Evitadas (tCO₂eq)')
         ax.set_ylabel('Frequência')
         ax.legend()
@@ -1037,7 +1022,7 @@ if st.session_state.get('run_simulation', False):
         results_mc_unfccc = []
         for i in range(n_simulations):
             params_unfccc = [umidade_vals[i], temp_vals[i], doc_vals[i]]
-            results_mc_unfccc.append(executar_simulacao_unfccc(params_unfccc, k_ano))
+            results_mc_unfccc.append(executar_simulacao_unfccc(params_unfccc))
 
         results_array_unfccc = np.array(results_mc_unfccc)
         media_unfccc = np.mean(results_array_unfccc)
@@ -1048,7 +1033,7 @@ if st.session_state.get('run_simulation', False):
         ax.axvline(media_unfccc, color='red', linestyle='--', label=f'Média: {formatar_br(media_unfccc)} tCO₂eq')
         ax.axvline(intervalo_95_unfccc[0], color='green', linestyle=':', label='IC 95%')
         ax.axvline(intervalo_95_unfccc[1], color='green', linestyle=':')
-        ax.set_title('Distribuição das Emissões Evitadas (Simulação Monte Carlo) - Cenário UNFCCC (k = {} ano⁻¹)'.format(formatar_br(k_ano)))
+        ax.set_title('Distribuição das Emissões Evitadas (Simulação Monte Carlo) - Cenário UNFCCC')
         ax.set_xlabel('Emissões Evitadas (tCO₂eq)')
         ax.set_ylabel('Frequência')
         ax.legend()
