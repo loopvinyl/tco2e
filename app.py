@@ -365,12 +365,40 @@ with st.sidebar:
     h_exposta = st.slider("Horas expostas por dia", 4, 24, 8, 1,
                          help="Horas diárias de exposição dos resíduos")
     
-    # ADIÇÃO: Slider para taxa de decaimento (k)
-    st.subheader("📉 Parâmetros de Degradação do Aterro")
-    k_ano = st.slider("Taxa de Decaimento (k) [ano⁻¹]", 0.06, 0.40, 0.06, 0.01,
-                     help="Taxa de decaimento anual para a degradação dos resíduos no aterro")
+    # ADIÇÃO: Seletor para taxa de decaimento (k) com duas opções específicas
+    st.subheader("📉 Taxa de Decaimento do Aterro")
+    
+    # Seletor para escolher entre os dois valores específicos
+    opcao_k = st.selectbox(
+        "Selecione a taxa de decaimento (k)",
+        options=[
+            "k = 0.06 ano⁻¹ (decaimento lento - valor padrão)",
+            "k = 0.40 ano⁻¹ (decaimento rápido)"
+        ],
+        index=0,
+        help="Selecione entre as duas taxas de decaimento para simulação do aterro"
+    )
+    
+    # Definir k_ano com base na seleção
+    if "0.40" in opcao_k:
+        k_ano = 0.40
+    else:
+        k_ano = 0.06
+    
     st.session_state.k_ano = k_ano
     st.write(f"**Taxa de decaimento selecionada:** {formatar_br(k_ano)} ano⁻¹")
+    
+    # Explicação sobre as taxas
+    with st.expander("ℹ️ Sobre as taxas de decaimento"):
+        st.markdown("""
+        **Taxas de decaimento (k):**
+        - **k = 0.06 ano⁻¹**: Decaimento lento, típico de aterros com baixa taxa de degradação
+        - **k = 0.40 ano⁻¹**: Decaimento rápido, típico de aterros com alta taxa de degradação
+        
+        **Impacto na simulação:**
+        - Taxas mais altas (k = 0.40) resultam em emissões mais concentradas no início
+        - Taxas mais baixas (k = 0.06) resultam em emissões mais distribuídas ao longo do tempo
+        """)
     
     st.subheader("🎯 Configuração de Simulação")
     anos_simulacao = st.slider("Anos de simulação", 5, 50, 20, 5,
@@ -602,11 +630,22 @@ def calcular_emissoes_compostagem(params, dias_simulacao=dias, dias_compostagem=
 
     return emissoes_CH4, emissoes_N2O
 
-def executar_simulacao_completa(parametros, k_ano):
-    umidade, T, DOC = parametros
+# =============================================================================
+# FUNÇÕES MODIFICADAS PARA AS ANÁLISES SOBOL COM TAXA DE DECAIMENTO
+# =============================================================================
+
+def executar_simulacao_completa_sobol(params_sobol):
+    """
+    Função para análise Sobol - substitui umidade por taxa de decaimento
+    Parâmetros: [taxa_decaimento, T, DOC]
+    """
+    k_ano_sobol, T_sobol, DOC_sobol = params_sobol
     
-    ch4_aterro, n2o_aterro = calcular_emissoes_aterro([umidade, T, DOC], k_ano)
-    ch4_vermi, n2o_vermi = calcular_emissoes_vermi([umidade, T, DOC])
+    # Usar a umidade fixa do slider
+    params_base = [umidade, T_sobol, DOC_sobol]
+    
+    ch4_aterro, n2o_aterro = calcular_emissoes_aterro(params_base, k_ano_sobol)
+    ch4_vermi, n2o_vermi = calcular_emissoes_vermi(params_base)
 
     total_aterro_tco2eq = (ch4_aterro * GWP_CH4_20 + n2o_aterro * GWP_N2O_20) / 1000
     total_vermi_tco2eq = (ch4_vermi * GWP_CH4_20 + n2o_vermi * GWP_N2O_20) / 1000
@@ -614,13 +653,20 @@ def executar_simulacao_completa(parametros, k_ano):
     reducao_tco2eq = total_aterro_tco2eq.sum() - total_vermi_tco2eq.sum()
     return reducao_tco2eq
 
-def executar_simulacao_unfccc(parametros, k_ano):
-    umidade, T, DOC = parametros
+def executar_simulacao_unfccc_sobol(params_sobol):
+    """
+    Função para análise Sobol UNFCCC - substitui umidade por taxa de decaimento
+    Parâmetros: [taxa_decaimento, T, DOC]
+    """
+    k_ano_sobol, T_sobol, DOC_sobol = params_sobol
+    
+    # Usar a umidade fixa do slider
+    params_base = [umidade, T_sobol, DOC_sobol]
 
-    ch4_aterro, n2o_aterro = calcular_emissoes_aterro([umidade, T, DOC], k_ano)
+    ch4_aterro, n2o_aterro = calcular_emissoes_aterro(params_base, k_ano_sobol)
     total_aterro_tco2eq = (ch4_aterro * GWP_CH4_20 + n2o_aterro * GWP_N2O_20) / 1000
 
-    ch4_compost, n2o_compost = calcular_emissoes_compostagem([umidade, T, DOC], dias_simulacao=dias, dias_compostagem=50)
+    ch4_compost, n2o_compost = calcular_emissoes_compostagem(params_base, dias_simulacao=dias, dias_compostagem=50)
     total_compost_tco2eq = (ch4_compost * GWP_CH4_20 + n2o_compost * GWP_N2O_20) / 1000
 
     reducao_tco2eq = total_aterro_tco2eq.sum() - total_compost_tco2eq.sum()
@@ -636,7 +682,7 @@ if st.session_state.get('run_simulation', False):
         # Executar modelo base
         params_base = [umidade, T, DOC]
         
-        # Usar k_ano da session state (do slider)
+        # Usar k_ano da session state (do seletor)
         k_ano = st.session_state.k_ano
 
         ch4_aterro_dia, n2o_aterro_dia = calcular_emissoes_aterro(params_base, k_ano)
@@ -710,7 +756,10 @@ if st.session_state.get('run_simulation', False):
         st.header("📈 Resultados da Simulação")
         
         # Informação sobre o k atual
-        st.info(f"**Taxa de decaimento (k) utilizada:** {formatar_br(k_ano)} ano⁻¹")
+        if k_ano == 0.06:
+            st.info(f"**Taxa de decaimento utilizada:** {formatar_br(k_ano)} ano⁻¹ (DECAIMENTO LENTO)")
+        else:
+            st.info(f"**Taxa de decaimento utilizada:** {formatar_br(k_ano)} ano⁻¹ (DECAIMENTO RÁPIDO)")
         
         # Obter valores totais
         total_evitado_tese = df['Reducao_tCO2eq_acum'].iloc[-1]
@@ -916,24 +965,30 @@ if st.session_state.get('run_simulation', False):
 
         st.pyplot(fig)
 
-        # Análise de Sensibilidade Global (Sobol) - PROPOSTA DA TESE
+        # =============================================================================
+        # ANÁLISE DE SENSIBILIDADE GLOBAL (SOBOL) MODIFICADA - COM TAXA DE DECAIMENTO
+        # =============================================================================
+        
+        # Análise de Sensibilidade Global (Sobol) - PROPOSTA DA TESE (COM TAXA DE DECAIMENTO)
         st.subheader("🎯 Análise de Sensibilidade Global (Sobol) - Proposta da Tese")
+        st.info("**ATUALIZAÇÃO:** Análise agora inclui Taxa de Decaimento (k) em vez de Umidade")
         br_formatter_sobol = FuncFormatter(br_format)
 
         np.random.seed(50)  
         
+        # PROBLEMA MODIFICADO: substituir umidade por taxa de decaimento
         problem_tese = {
             'num_vars': 3,
-            'names': ['umidade', 'T', 'DOC'],
+            'names': ['taxa_decaimento', 'T', 'DOC'],
             'bounds': [
-                [0.5, 0.85],         # umidade
-                [25.0, 45.0],       # temperatura
-                [0.15, 0.50],       # doc
+                [0.06, 0.40],        # taxa de decaimento (k) - substitui umidade
+                [25.0, 45.0],        # temperatura
+                [0.15, 0.50],        # doc
             ]
         }
 
         param_values_tese = sample(problem_tese, n_samples)
-        results_tese = Parallel(n_jobs=-1)(delayed(executar_simulacao_completa)(params, k_ano) for params in param_values_tese)
+        results_tese = Parallel(n_jobs=-1)(delayed(executar_simulacao_completa_sobol)(params) for params in param_values_tese)
         Si_tese = analyze(problem_tese, np.array(results_tese), print_to_console=False)
         
         sensibilidade_df_tese = pd.DataFrame({
@@ -942,32 +997,47 @@ if st.session_state.get('run_simulation', False):
             'ST': Si_tese['ST']
         }).sort_values('ST', ascending=False)
 
+        # Mapear nomes para exibição mais amigável
+        nomes_amigaveis = {
+            'taxa_decaimento': 'Taxa de Decaimento (k)',
+            'T': 'Temperatura',
+            'DOC': 'Carbono Orgânico Degradável'
+        }
+        sensibilidade_df_tese['Parâmetro'] = sensibilidade_df_tese['Parâmetro'].map(nomes_amigaveis)
+
         fig, ax = plt.subplots(figsize=(10, 6))
         sns.barplot(x='ST', y='Parâmetro', data=sensibilidade_df_tese, palette='viridis', ax=ax)
-        ax.set_title('Sensibilidade Global dos Parâmetros (Índice Sobol Total) - Proposta da Tese')
-        ax.set_xlabel('Índice ST')
-        ax.set_ylabel('')
+        ax.set_title('Sensibilidade Global - Proposta da Tese (k substitui Umidade)')
+        ax.set_xlabel('Índice ST (Sobol Total)')
+        ax.set_ylabel('Parâmetro')
         ax.grid(axis='x', linestyle='--', alpha=0.7)
-        ax.xaxis.set_major_formatter(br_formatter_sobol) # Adiciona formatação ao eixo x
+        ax.xaxis.set_major_formatter(br_formatter_sobol)
+        
+        # Adicionar valores nas barras
+        for i, (st_value) in enumerate(sensibilidade_df_tese['ST']):
+            ax.text(st_value, i, f' {formatar_br(st_value)}', va='center', fontweight='bold')
+        
         st.pyplot(fig)
 
-        # Análise de Sensibilidade Global (Sobol) - CENÁRIO UNFCCC
+        # Análise de Sensibilidade Global (Sobol) - CENÁRIO UNFCCC (COM TAXA DE DECAIMENTO)
         st.subheader("🎯 Análise de Sensibilidade Global (Sobol) - Cenário UNFCCC")
+        st.info("**ATUALIZAÇÃO:** Análise agora inclui Taxa de Decaimento (k) em vez de Umidade")
 
         np.random.seed(50)
         
+        # PROBLEMA MODIFICADO: substituir umidade por taxa de decaimento
         problem_unfccc = {
             'num_vars': 3,
-            'names': ['umidade', 'T', 'DOC'],
+            'names': ['taxa_decaimento', 'T', 'DOC'],
             'bounds': [
-                [0.5, 0.85],  # Umidade
-                [25, 45],     # Temperatura
-                [0.15, 0.50], # DOC
+                [0.06, 0.40],  # Taxa de Decaimento (k) - substitui Umidade
+                [25, 45],      # Temperatura
+                [0.15, 0.50],  # DOC
             ]
         }
 
         param_values_unfccc = sample(problem_unfccc, n_samples)
-        results_unfccc = Parallel(n_jobs=-1)(delayed(executar_simulacao_unfccc)(params, k_ano) for params in param_values_unfccc)
+        results_unfccc = Parallel(n_jobs=-1)(delayed(executar_simulacao_unfccc_sobol)(params) for params in param_values_unfccc)
         Si_unfccc = analyze(problem_unfccc, np.array(results_unfccc), print_to_console=False)
         
         sensibilidade_df_unfccc = pd.DataFrame({
@@ -976,18 +1046,29 @@ if st.session_state.get('run_simulation', False):
             'ST': Si_unfccc['ST']
         }).sort_values('ST', ascending=False)
 
+        # Mapear nomes para exibição mais amigável
+        sensibilidade_df_unfccc['Parâmetro'] = sensibilidade_df_unfccc['Parâmetro'].map(nomes_amigaveis)
+
         fig, ax = plt.subplots(figsize=(10, 6))
         sns.barplot(x='ST', y='Parâmetro', data=sensibilidade_df_unfccc, palette='viridis', ax=ax)
-        ax.set_title('Sensibilidade Global dos Parâmetros (Índice Sobol Total) - Cenário UNFCCC')
-        ax.set_xlabel('Índice ST')
-        ax.set_ylabel('')
+        ax.set_title('Sensibilidade Global - Cenário UNFCCC (k substitui Umidade)')
+        ax.set_xlabel('Índice ST (Sobol Total)')
+        ax.set_ylabel('Parâmetro')
         ax.grid(axis='x', linestyle='--', alpha=0.7)
-        ax.xaxis.set_major_formatter(br_formatter_sobol) # Adiciona formatação ao eixo x
+        ax.xaxis.set_major_formatter(br_formatter_sobol)
+        
+        # Adicionar valores nas barras
+        for i, (st_value) in enumerate(sensibilidade_df_unfccc['ST']):
+            ax.text(st_value, i, f' {formatar_br(st_value)}', va='center', fontweight='bold')
+        
         st.pyplot(fig)
 
+        # =============================================================================
+        # ANÁLISE DE INCERTEZA (MONTE CARLO) - MANTIDA COMO ORIGINAL
+        # =============================================================================
+        
         # Análise de Incerteza (Monte Carlo) - PROPOSTA DA TESE
         st.subheader("🎲 Análise de Incerteza (Monte Carlo) - Proposta da Tese")
-
         
         def gerar_parametros_mc_tese(n):
             np.random.seed(50)
@@ -1002,7 +1083,15 @@ if st.session_state.get('run_simulation', False):
         results_mc_tese = []
         for i in range(n_simulations):
             params_tese = [umidade_vals[i], temp_vals[i], doc_vals[i]]
-            results_mc_tese.append(executar_simulacao_completa(params_tese, k_ano))
+            # Reutilizar função original para Monte Carlo
+            ch4_aterro, n2o_aterro = calcular_emissoes_aterro(params_tese, k_ano)
+            ch4_vermi, n2o_vermi = calcular_emissoes_vermi(params_tese)
+            
+            total_aterro_tco2eq = (ch4_aterro * GWP_CH4_20 + n2o_aterro * GWP_N2O_20) / 1000
+            total_vermi_tco2eq = (ch4_vermi * GWP_CH4_20 + n2o_vermi * GWP_N2O_20) / 1000
+            reducao_tco2eq = total_aterro_tco2eq.sum() - total_vermi_tco2eq.sum()
+            
+            results_mc_tese.append(reducao_tco2eq)
 
         results_array_tese = np.array(results_mc_tese)
         media_tese = np.mean(results_array_tese)
@@ -1037,7 +1126,15 @@ if st.session_state.get('run_simulation', False):
         results_mc_unfccc = []
         for i in range(n_simulations):
             params_unfccc = [umidade_vals[i], temp_vals[i], doc_vals[i]]
-            results_mc_unfccc.append(executar_simulacao_unfccc(params_unfccc, k_ano))
+            # Reutilizar função original para Monte Carlo
+            ch4_aterro, n2o_aterro = calcular_emissoes_aterro(params_unfccc, k_ano)
+            ch4_compost, n2o_compost = calcular_emissoes_compostagem(params_unfccc, dias_simulacao=dias, dias_compostagem=50)
+            
+            total_aterro_tco2eq = (ch4_aterro * GWP_CH4_20 + n2o_aterro * GWP_N2O_20) / 1000
+            total_compost_tco2eq = (ch4_compost * GWP_CH4_20 + n2o_compost * GWP_N2O_20) / 1000
+            reducao_tco2eq = total_aterro_tco2eq.sum() - total_compost_tco2eq.sum()
+            
+            results_mc_unfccc.append(reducao_tco2eq)
 
         results_array_unfccc = np.array(results_mc_unfccc)
         media_unfccc = np.mean(results_array_unfccc)
