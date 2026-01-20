@@ -244,7 +244,7 @@ def calcular_metano_aterro_sinisa(residuos_kg, umidade, temperatura, doc_val, di
     potencial_CH4_total = residuos_kg * potencial_CH4_por_kg
     
     # Taxa de decaimento anual (k = 0.06 por ano)
-    k_ano = 0.06
+    k_ano = 0.4
     k_dia = k_ano / 365.0
     
     # Kernel de decaimento NÃO normalizado (IPCC correto)
