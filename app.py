@@ -983,7 +983,7 @@ if st.session_state.get('run_simulation', False):
             'bounds': [
                 [0.06, 0.40],        # taxa de decaimento (k) - substitui umidade
                 [25.0, 45.0],        # temperatura
-                [0.15, 0.50],        # doc
+                [0.15, 0.25],        # doc
             ]
         }
 
@@ -1032,7 +1032,7 @@ if st.session_state.get('run_simulation', False):
             'bounds': [
                 [0.06, 0.40],  # Taxa de Decaimento (k) - substitui Umidade
                 [25, 45],      # Temperatura
-                [0.15, 0.50],  # DOC
+                [0.15, 0.25],  # DOC
             ]
         }
 
