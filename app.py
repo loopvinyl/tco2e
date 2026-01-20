@@ -27,7 +27,7 @@ plt.rcParams['font.size'] = 10
 sns.set_style("whitegrid")
 
 # =============================================================================
-# FUNÇÕES DE COTAÇÃO AUTOMÁTICA DO CARBONO E CÂMBIO (AGORA DEFINIDAS PRIMEIRO)
+# FUNÇÕES DE COTAÇÃO AUTOMÁTICA DO CARBONO E CÂMBIO
 # =============================================================================
 
 def obter_cotacao_carbono_investing():
@@ -245,10 +245,238 @@ def exibir_cotacao_carbono():
         """)
 
 # =============================================================================
-# INICIALIZAÇÃO DA SESSION STATE (AGORA DEPOIS DAS FUNÇÕES DE COTAÇÃO)
+# FUNÇÕES PARA DETERMINAR k (TAXA DE DECAIMENTO) SEGUNDO DOCUMENTO PDF
 # =============================================================================
 
-# Inicializar todas as variáveis de session state necessárias
+def determinar_taxa_decaimento(tipo_residuo, clima, temperatura_media, precipitacao_anual):
+    """
+    Determina a taxa de decaimento (k) com base nas tabelas do documento PDF.
+    
+    Args:
+        tipo_residuo (str): Tipo de resíduo (alimentos, madeira, papel, etc.)
+        clima (str): Clima (Boreal/Temperado ou Tropical)
+        temperatura_media (float): Temperatura média anual (°C)
+        precipitacao_anual (float): Precipitação anual (mm)
+        
+    Returns:
+        float: Valor de k (1/ano)
+    """
+    
+    # Tabela de valores k conforme documento PDF (página 17)
+    # Estrutura: {tipo_residuo: {clima: {condicao_umidade: k}}}
+    tabela_k = {
+        "Papel, papelão, têxteis (exceto lodo)": {
+            "Boreal/Temperado": {
+                "seco": 0.04,
+                "umido": 0.06
+            },
+            "Tropical": {
+                "seco": 0.045,
+                "umido": 0.07
+            }
+        },
+        "Madeira, produtos de madeira, palha": {
+            "Boreal/Temperado": {
+                "seco": 0.02,
+                "umido": 0.03
+            },
+            "Tropical": {
+                "seco": 0.025,
+                "umido": 0.035
+            }
+        },
+        "Outros resíduos orgânicos putrescíveis (jardim, parque, não alimentares)": {
+            "Boreal/Temperado": {
+                "seco": 0.05,
+                "umido": 0.10
+            },
+            "Tropical": {
+                "seco": 0.065,
+                "umido": 0.17
+            }
+        },
+        "Alimentos, resíduos alimentares, lodo de esgoto, bebidas, tabaco": {
+            "Boreal/Temperado": {
+                "seco": 0.06,
+                "umido": 0.185
+            },
+            "Tropical": {
+                "seco": 0.085,
+                "umido": 0.40
+            }
+        },
+        "Lodo da indústria de papel e celulose": {
+            "Boreal/Temperado": {
+                "seco": 0.03,
+                "umido": 0.03
+            },
+            "Tropical": {
+                "seco": 0.03,
+                "umido": 0.03
+            }
+        },
+        "EFB (cachos de frutas vazios)": {
+            "Boreal/Temperado": {
+                "seco": 0.05,
+                "umido": 0.10
+            },
+            "Tropical": {
+                "seco": 0.065,
+                "umido": 0.17
+            }
+        }
+    }
+    
+    # Determinar se é clima tropical ou boreal/temperado
+    # MAT ≤ 20°C = Boreal/Temperado, MAT > 20°C = Tropical
+    if temperatura_media > 20:
+        tipo_clima = "Tropical"
+    else:
+        tipo_clima = "Boreal/Temperado"
+    
+    # Determinar condição de umidade (seco ou úmido)
+    # Para Boreal/Temperado: MAP/PET < 1 = seco, MAP/PET > 1 = úmido
+    # Para Tropical: MAP < 1000 mm = seco, MAP > 1000 mm = úmido
+    
+    # Para simplificação, usaremos apenas precipitação
+    if tipo_clima == "Boreal/Temperado":
+        # Estimativa PET (evapotranspiração potencial) simplificada
+        # Em climas temperados, PET média anual ~ 800-1200 mm
+        # Usaremos 1000 mm como referência
+        pet_estimado = 1000
+        if precipitacao_anual / pet_estimado < 1:
+            condicao_umidade = "seco"
+        else:
+            condicao_umidade = "umido"
+    else:  # Tropical
+        if precipitacao_anual < 1000:
+            condicao_umidade = "seco"
+        else:
+            condicao_umidade = "umido"
+    
+    # Obter valor de k
+    try:
+        k_valor = tabela_k[tipo_residuo][tipo_clima][condicao_umidade]
+        
+        # Informações adicionais para debug/log
+        st.session_state.info_k = {
+            "tipo_residuo": tipo_residuo,
+            "clima": tipo_clima,
+            "condicao_umidade": condicao_umidade,
+            "temperatura_media": temperatura_media,
+            "precipitacao_anual": precipitacao_anual,
+            "k_calculado": k_valor
+        }
+        
+        return k_valor
+    except KeyError:
+        # Valor padrão conservador em caso de erro
+        st.warning(f"Tipo de resíduo não encontrado na tabela. Usando valor padrão k=0.06")
+        return 0.06
+
+def determinar_doc_por_tipo(tipo_residuo, umidade_percent):
+    """
+    Determina o valor de DOC (Carbono Orgânico Degradável) por tipo de resíduo.
+    Baseado na tabela da página 16 do documento PDF.
+    
+    Args:
+        tipo_residuo (str): Tipo de resíduo
+        umidade_percent (float): Umidade do resíduo em percentual (0-100)
+        
+    Returns:
+        float: Valor de DOC (fração)
+    """
+    
+    # Tabela de valores DOCj (% base úmida) conforme documento PDF (página 16)
+    tabela_doc = {
+        "Madeira e produtos de madeira": 0.43,
+        "Polpa, papel e papelão (exceto lodo)": 0.40,
+        "Alimentos, resíduos alimentares, bebidas, tabaco (exceto lodo)": 0.15,
+        "Têxteis": 0.24,
+        "Jardim, quintal e resíduos de parque": 0.20,
+        "Vidro, plástico, metal, outros resíduos inertes": 0.0,
+        "EFB (cachos de frutas vazios)": 0.20,  # Similar a resíduos de jardim
+        "Lodo industrial": 0.09,  # Assumindo 35% matéria orgânica seca
+        "Lodo doméstico": 0.05,  # Assumindo 10% matéria orgânica seca
+        "Lodo da indústria de papel e celulose": 0.09,
+    }
+    
+    # Mapear tipos de resíduo do seletor para as chaves da tabela
+    mapeamento_tipos = {
+        "Papel, papelão, têxteis (exceto lodo)": "Polpa, papel e papelão (exceto lodo)",
+        "Madeira, produtos de madeira, palha": "Madeira e produtos de madeira",
+        "Outros resíduos orgânicos putrescíveis (jardim, parque, não alimentares)": "Jardim, quintal e resíduos de parque",
+        "Alimentos, resíduos alimentares, lodo de esgoto, bebidas, tabaco": "Alimentos, resíduos alimentares, bebidas, tabaco (exceto lodo)",
+        "Lodo da indústria de papel e celulose": "Lodo da indústria de papel e celulose",
+        "EFB (cachos de frutas vazios)": "EFB (cachos de frutas vazios)"
+    }
+    
+    try:
+        tipo_mapeado = mapeamento_tipos[tipo_residuo]
+        doc_percent = tabela_doc[tipo_mapeado]
+        
+        # Converter para fração
+        doc_fração = doc_percent / 100.0
+        
+        # Ajustar para umidade? (O DOC na tabela é em base úmida, então já está correto)
+        
+        return doc_fração
+    except KeyError:
+        # Valor padrão em caso de erro
+        return 0.15  # Valor padrão para resíduos alimentares
+
+# =============================================================================
+# FUNÇÕES ORIGINAIS DO SEU SCRIPT
+# =============================================================================
+
+def formatar_br(numero):
+    """
+    Formata números no padrão brasileiro: 1.234,56
+    """
+    if pd.isna(numero):
+        return "N/A"
+    
+    # Arredonda para 2 casas decimais
+    numero = round(numero, 2)
+    
+    # Formata como string e substitui o ponto pela vírgula
+    return f"{numero:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def formatar_br_dec(numero, decimais=2):
+    """
+    Formata números no padrão brasileiro com número específico de casas decimais
+    """
+    if pd.isna(numero):
+        return "N/A"
+    
+    # Arredonda para o número de casas decimais especificado
+    numero = round(numero, decimais)
+    
+    # Formata como string e substitui o ponto pela vírgula
+    return f"{numero:,.{decimais}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def br_format(x, pos):
+    """
+    Função de formatação para eixos de gráficos (padrão brasileiro)
+    """
+    if x == 0:
+        return "0"
+    
+    # Para valores muito pequenos, usa notação científica
+    if abs(x) < 0.01:
+        return f"{x:.1e}".replace(".", ",")
+    
+    # Para valores grandes, formata com separador de milhar
+    if abs(x) >= 1000:
+        return f"{x:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    
+    # Para valores menores, mostra duas casas decimais
+    return f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+# =============================================================================
+# INICIALIZAÇÃO DA SESSION STATE
+# =============================================================================
+
 def inicializar_session_state():
     if 'preco_carbono' not in st.session_state:
         # Buscar cotação automaticamente na inicialização
@@ -274,61 +502,18 @@ def inicializar_session_state():
     if 'cotacao_carregada' not in st.session_state:
         st.session_state.cotacao_carregada = False
     if 'k_ano' not in st.session_state:
-        st.session_state.k_ano = 0.06  # Valor padrão
+        st.session_state.k_ano = 0.06  # Valor padrão inicial
+    if 'doc_por_tipo' not in st.session_state:
+        st.session_state.doc_por_tipo = 0.15  # Valor padrão DOC
+    if 'info_k' not in st.session_state:
+        st.session_state.info_k = None
 
 # Chamar a inicialização
 inicializar_session_state()
 
 # =============================================================================
-# FUNÇÕES ORIGINAIS DO SEU SCRIPT
+# INTERFACE DO STREAMLIT
 # =============================================================================
-
-# Função para formatar números no padrão brasileiro
-def formatar_br(numero):
-    """
-    Formata números no padrão brasileiro: 1.234,56
-    """
-    if pd.isna(numero):
-        return "N/A"
-    
-    # Arredonda para 2 casas decimais
-    numero = round(numero, 2)
-    
-    # Formata como string e substitui o ponto pela vírgula
-    return f"{numero:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-# Função para formatar com número específico de casas decimais
-def formatar_br_dec(numero, decimais=2):
-    """
-    Formata números no padrão brasileiro com número específico de casas decimais
-    """
-    if pd.isna(numero):
-        return "N/A"
-    
-    # Arredonda para o número de casas decimais especificado
-    numero = round(numero, decimais)
-    
-    # Formata como string e substitui o ponto pela vírgula
-    return f"{numero:,.{decimais}f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-# Função de formatação para os gráficos
-def br_format(x, pos):
-    """
-    Função de formatação para eixos de gráficos (padrão brasileiro)
-    """
-    if x == 0:
-        return "0"
-    
-    # Para valores muito pequenos, usa notação científica
-    if abs(x) < 0.01:
-        return f"{x:.1e}".replace(".", ",")
-    
-    # Para valores grandes, formata com separador de milhar
-    if abs(x) >= 1000:
-        return f"{x:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    
-    # Para valores menores, mostra duas casas decimais
-    return f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 # Título do aplicativo
 st.title("Simulador de Emissões de tCO₂eq")
@@ -340,7 +525,7 @@ Esta ferramenta projeta os Créditos de Carbono ao calcular as emissões de gase
 # SIDEBAR COM PARÂMETROS
 # =============================================================================
 
-# Seção de cotação do carbono - AGORA ATUALIZADA AUTOMATICAMENTE
+# Seção de cotação do carbono
 exibir_cotacao_carbono()
 
 # Seção original de parâmetros
@@ -365,39 +550,114 @@ with st.sidebar:
     h_exposta = st.slider("Horas expostas por dia", 4, 24, 8, 1,
                          help="Horas diárias de exposição dos resíduos")
     
-    # ADIÇÃO: Seletor para taxa de decaimento (k) com duas opções específicas
-    st.subheader("📉 Taxa de Decaimento do Aterro")
+    # =========================================================================
+    # NOVA SEÇÃO: PARÂMETROS PARA DETERMINAR k SEGUNDO DOCUMENTO PDF
+    # =========================================================================
+    st.subheader("📉 Taxa de Decaimento do Aterro (IPCC 2006)")
     
-    # Seletor para escolher entre os dois valores específicos
-    opcao_k = st.selectbox(
-        "Selecione a taxa de decaimento (k)",
+    # Seletor para tipo de resíduo (conforme tabela do PDF)
+    tipo_residuo = st.selectbox(
+        "Tipo de resíduo no aterro",
         options=[
-            "k = 0.06 ano⁻¹ (decaimento lento - valor padrão)",
-            "k = 0.40 ano⁻¹ (decaimento rápido)"
+            "Alimentos, resíduos alimentares, lodo de esgoto, bebidas, tabaco",
+            "Papel, papelão, têxteis (exceto lodo)",
+            "Madeira, produtos de madeira, palha",
+            "Outros resíduos orgânicos putrescíveis (jardim, parque, não alimentares)",
+            "Lodo da indústria de papel e celulose",
+            "EFB (cachos de frutas vazios)"
         ],
         index=0,
-        help="Selecione entre as duas taxas de decaimento para simulação do aterro"
+        help="Selecione o tipo de resíduo conforme tabela do IPCC 2006"
     )
     
-    # Definir k_ano com base na seleção
-    if "0.40" in opcao_k:
-        k_ano = 0.40
-    else:
-        k_ano = 0.06
+    # Parâmetros climáticos
+    col1, col2 = st.columns(2)
+    with col1:
+        temperatura_media = st.number_input(
+            "Temperatura média anual (°C)",
+            min_value=-10.0,
+            max_value=40.0,
+            value=25.0,
+            step=0.5,
+            help="Temperatura média anual (MAT) para determinar clima"
+        )
     
-    st.session_state.k_ano = k_ano
-    st.write(f"**Taxa de decaimento selecionada:** {formatar_br(k_ano)} ano⁻¹")
+    with col2:
+        precipitacao_anual = st.number_input(
+            "Precipitação anual (mm)",
+            min_value=100.0,
+            max_value=5000.0,
+            value=1200.0,
+            step=50.0,
+            help="Precipitação média anual (MAP)"
+        )
+    
+    # Calcular k automaticamente
+    if st.button("🔍 Calcular Taxa de Decaimento (k)", key="calcular_k"):
+        # Determinar DOC baseado no tipo de resíduo
+        doc_calculado = determinar_doc_por_tipo(tipo_residuo, umidade_valor)
+        st.session_state.doc_por_tipo = doc_calculado
+        
+        # Determinar k baseado nos parâmetros
+        k_calculado = determinar_taxa_decaimento(
+            tipo_residuo, 
+            "Tropical",  # Será determinado internamente pela temperatura
+            temperatura_media, 
+            precipitacao_anual
+        )
+        
+        st.session_state.k_ano = k_calculado
+        
+        # Mostrar informações detalhadas
+        if st.session_state.info_k:
+            info = st.session_state.info_k
+            with st.expander("ℹ️ Detalhes do cálculo de k"):
+                st.markdown(f"""
+                **📊 Parâmetros utilizados:**
+                - **Tipo de resíduo:** {info['tipo_residuo']}
+                - **Clima determinado:** {info['clima']} (MAT = {info['temperatura_media']}°C)
+                - **Condição de umidade:** {info['condicao_umidade']} (MAP = {info['precipitacao_anual']} mm)
+                - **DOC calculado:** {formatar_br(doc_calculado * 100)}%
+                - **Taxa de decaimento (k):** {formatar_br(info['k_calculado'])} ano⁻¹
+                
+                **🌍 Categorias climáticas:**
+                - **Boreal/Temperado:** MAT ≤ 20°C
+                - **Tropical:** MAT > 20°C
+                - **Seco (Boreal/Temperado):** MAP/PET < 1
+                - **Úmido (Boreal/Temperado):** MAP/PET > 1
+                - **Seco (Tropical):** MAP < 1000 mm
+                - **Úmido (Tropical):** MAP > 1000 mm
+                """)
+        
+        st.success(f"Taxa de decaimento calculada: **{formatar_br(k_calculado)} ano⁻¹**")
+    
+    # Mostrar valor atual de k
+    k_ano = st.session_state.k_ano
+    st.write(f"**Taxa de decaimento atual:** {formatar_br(k_ano)} ano⁻¹")
     
     # Explicação sobre as taxas
-    with st.expander("ℹ️ Sobre as taxas de decaimento"):
+    with st.expander("ℹ️ Sobre as taxas de decaimento (IPCC 2006)"):
         st.markdown("""
-        **Taxas de decaimento (k):**
-        - **k = 0.06 ano⁻¹**: Decaimento lento, típico de aterros com baixa taxa de degradação
-        - **k = 0.40 ano⁻¹**: Decaimento rápido, típico de aterros com alta taxa de degradação
+        **📋 Valores de k conforme IPCC 2006 Guidelines:**
         
-        **Impacto na simulação:**
-        - Taxas mais altas (k = 0.40) resultam em emissões mais concentradas no início
-        - Taxas mais baixas (k = 0.06) resultam em emissões mais distribuídas ao longo do tempo
+        | Tipo de Resíduo | Boreal/Temperado (MAT≤20°C) | Tropical (MAT>20°C) |
+        |----------------|-----------------------------|---------------------|
+        |                | Seco (MAP/PET<1) | Úmido (MAP/PET>1) | Seco (MAP<1000mm) | Úmido (MAP>1000mm) |
+        | **Papel, papelão, têxteis** | 0.04 | 0.06 | 0.045 | 0.07 |
+        | **Madeira, produtos de madeira** | 0.02 | 0.03 | 0.025 | 0.035 |
+        | **Resíduos de jardim/parque** | 0.05 | 0.10 | 0.065 | 0.17 |
+        | **Alimentos, resíduos alimentares** | 0.06 | 0.185 | 0.085 | 0.40 |
+        | **Lodo papel e celulose** | 0.03 | 0.03 | 0.03 | 0.03 |
+        
+        **📊 Parâmetros:**
+        - **MAT:** Temperatura média anual
+        - **MAP:** Precipitação média anual
+        - **PET:** Evapotranspiração potencial
+        - **MAP/PET:** Razão entre precipitação e evapotranspiração
+        
+        **💡 Impacto na simulação:**
+        - Valores mais altos (ex: 0.40) → decomposição rápida, emissões concentradas no início
+        - Valores mais baixos (ex: 0.02) → decomposição lenta, emissões distribuídas ao longo do tempo
         """)
     
     st.subheader("🎯 Configuração de Simulação")
@@ -415,16 +675,18 @@ with st.sidebar:
 # PARÂMETROS FIXOS (DO CÓDIGO ORIGINAL)
 # =============================================================================
 
-T = 25  # Temperatura média (ºC)
-DOC = 0.15  # Carbono orgânico degradável (fração)
+T = 25  # Temperatura média (ºC) - será substituída pela do slider
+# DOC agora virá do cálculo baseado no tipo de resíduo
+DOC = st.session_state.doc_por_tipo  # Carbono orgânico degradável (fração)
+
 DOCf_val = 0.0147 * T + 0.28
 MCF = 1  # Fator de correção de metano
 F = 0.5  # Fração de metano no biogás
 OX = 0.1  # Fator de oxidação
 Ri = 0.0  # Metano recuperado
 
-# Constante de decaimento - AGORA VEM DO SLIDER (st.session_state.k_ano)
-k_ano = st.session_state.k_ano  # Constante de decaimento anual (ajustável)
+# Constante de decaimento - AGORA VEM DO CÁLCULO BASEADO NO PDF
+k_ano = st.session_state.k_ano  # Constante de decaimento anual
 
 # Vermicompostagem (Yang et al. 2017) - valores fixos
 TOC_YANG = 0.436  # Fração de carbono orgânico total
@@ -523,7 +785,7 @@ PERFIL_N2O_THERMO = np.array([
 PERFIL_N2O_THERMO /= PERFIL_N2O_THERMO.sum()
 
 # =============================================================================
-# FUNÇÕES DE CÁLCULO (ADAPTADAS DO SCRIPT ANEXO)
+# FUNÇÕES DE CÁLCULO (MANTIDAS COMO ORIGINAL)
 # =============================================================================
 
 def ajustar_emissoes_pre_descarte(O2_concentracao):
@@ -682,7 +944,7 @@ if st.session_state.get('run_simulation', False):
         # Executar modelo base
         params_base = [umidade, T, DOC]
         
-        # Usar k_ano da session state (do seletor)
+        # Usar k_ano da session state (calculado ou padrão)
         k_ano = st.session_state.k_ano
 
         ch4_aterro_dia, n2o_aterro_dia = calcular_emissoes_aterro(params_base, k_ano)
@@ -755,11 +1017,28 @@ if st.session_state.get('run_simulation', False):
         # Exibir resultados
         st.header("📈 Resultados da Simulação")
         
-        # Informação sobre o k atual
-        if k_ano == 0.06:
-            st.info(f"**Taxa de decaimento utilizada:** {formatar_br(k_ano)} ano⁻¹ (DECAIMENTO LENTO)")
-        else:
-            st.info(f"**Taxa de decaimento utilizada:** {formatar_br(k_ano)} ano⁻¹ (DECAIMENTO RÁPIDO)")
+        # Informação detalhada sobre os parâmetros utilizados
+        with st.expander("📋 Parâmetros Utilizados na Simulação"):
+            if st.session_state.info_k:
+                info = st.session_state.info_k
+                st.markdown(f"""
+                **🌡️ Parâmetros Climáticos:**
+                - **Temperatura média (MAT):** {formatar_br(info['temperatura_media'])}°C
+                - **Precipitação anual (MAP):** {formatar_br(info['precipitacao_anual'])} mm
+                - **Clima determinado:** {info['clima']}
+                - **Condição de umidade:** {info['condicao_umidade']}
+                
+                **🗑️ Parâmetros do Resíduo:**
+                - **Tipo de resíduo:** {info['tipo_residuo']}
+                - **DOC utilizado:** {formatar_br(st.session_state.doc_por_tipo * 100)}%
+                - **Taxa de decaimento (k):** {formatar_br(info['k_calculado'])} ano⁻¹
+                
+                **⚙️ Parâmetros Operacionais:**
+                - **Quantidade de resíduos:** {formatar_br(residuos_kg_dia)} kg/dia
+                - **Umidade:** {formatar_br(umidade_valor)}%
+                - **Massa exposta:** {formatar_br(massa_exposta_kg)} kg
+                - **Horas expostas:** {formatar_br(h_exposta)} h/dia
+                """)
         
         # Obter valores totais
         total_evitado_tese = df['Reducao_tCO2eq_acum'].iloc[-1]
@@ -888,28 +1167,6 @@ if st.session_state.get('run_simulation', False):
                 help=f"Emissões evitadas por ano em média"
             )
 
-        # Adicionar explicação sobre as métricas anuais
-        with st.expander("💡 Entenda as métricas anuais"):
-            st.markdown(f"""
-            **📊 Como interpretar as métricas anuais:**
-            
-            **Metodologia da Tese:**
-            - **Total em {anos_simulacao} anos:** {formatar_br(total_evitado_tese)} tCO₂eq
-            - **Média anual:** {formatar_br(media_anual_tese)} tCO₂eq/ano
-            - Equivale a aproximadamente **{formatar_br(media_anual_tese / 365)} tCO₂eq/dia**
-            
-            **Metodologia UNFCCC:**
-            - **Total em {anos_simulacao} anos:** {formatar_br(total_evitado_unfccc)} tCO₂eq
-            - **Média anual:** {formatar_br(media_anual_unfccc)} tCO₂eq/ano
-            - Equivale a aproximadamente **{formatar_br(media_anual_unfccc / 365)} tCO₂eq/dia**
-            
-            **💡 Significado prático:**
-            - As métricas anuais ajudam a planejar projetos de longo prazo
-            - Permitem comparar com metas anuais de redução de emissões
-            - Facilitam o cálculo de retorno financeiro anual
-            - A média anual representa o desempenho constante do projeto
-            """)
-
         # Gráfico comparativo
         st.subheader("📊 Comparação Anual das Emissões Evitadas")
         df_evitadas_anual = pd.DataFrame({
@@ -971,7 +1228,7 @@ if st.session_state.get('run_simulation', False):
         
         # Análise de Sensibilidade Global (Sobol) - PROPOSTA DA TESE (COM TAXA DE DECAIMENTO)
         st.subheader("🎯 Análise de Sensibilidade Global (Sobol) - Proposta da Tese")
-        st.info("**ATUALIZAÇÃO:** Análise agora inclui Taxa de Decaimento (k) em vez de Umidade")
+        st.info("**ATUALIZAÇÃO:** Análise inclui Taxa de Decaimento (k) baseada no IPCC 2006")
         br_formatter_sobol = FuncFormatter(br_format)
 
         np.random.seed(50)  
@@ -981,9 +1238,10 @@ if st.session_state.get('run_simulation', False):
             'num_vars': 3,
             'names': ['taxa_decaimento', 'T', 'DOC'],
             'bounds': [
-                [0.06, 0.40],        # taxa de decaimento (k) - substitui umidade
-                [25.0, 45.0],        # temperatura
-                [0.15, 0.25],        # doc
+                [max(0.02, k_ano * 0.5), min(0.40, k_ano * 1.5)],  # Variação de ±50% em torno do k calculado
+                [20.0, 30.0],        # temperatura (variação razoável)
+                [max(0.05, st.session_state.doc_por_tipo * 0.5), 
+                 min(0.50, st.session_state.doc_por_tipo * 1.5)],  # Variação de ±50% em torno do DOC
             ]
         }
 
@@ -1007,7 +1265,7 @@ if st.session_state.get('run_simulation', False):
 
         fig, ax = plt.subplots(figsize=(10, 6))
         sns.barplot(x='ST', y='Parâmetro', data=sensibilidade_df_tese, palette='viridis', ax=ax)
-        ax.set_title('Sensibilidade Global - Proposta da Tese (k substitui Umidade)')
+        ax.set_title('Sensibilidade Global - Proposta da Tese (baseado em IPCC 2006)')
         ax.set_xlabel('Índice ST (Sobol Total)')
         ax.set_ylabel('Parâmetro')
         ax.grid(axis='x', linestyle='--', alpha=0.7)
@@ -1021,7 +1279,7 @@ if st.session_state.get('run_simulation', False):
 
         # Análise de Sensibilidade Global (Sobol) - CENÁRIO UNFCCC (COM TAXA DE DECAIMENTO)
         st.subheader("🎯 Análise de Sensibilidade Global (Sobol) - Cenário UNFCCC")
-        st.info("**ATUALIZAÇÃO:** Análise agora inclui Taxa de Decaimento (k) em vez de Umidade")
+        st.info("**ATUALIZAÇÃO:** Análise inclui Taxa de Decaimento (k) baseada no IPCC 2006")
 
         np.random.seed(50)
         
@@ -1030,9 +1288,10 @@ if st.session_state.get('run_simulation', False):
             'num_vars': 3,
             'names': ['taxa_decaimento', 'T', 'DOC'],
             'bounds': [
-                [0.06, 0.40],  # Taxa de Decaimento (k) - substitui Umidade
-                [25, 45],      # Temperatura
-                [0.15, 0.25],  # DOC
+                [max(0.02, k_ano * 0.5), min(0.40, k_ano * 1.5)],  # Variação de ±50% em torno do k calculado
+                [20, 30],      # Temperatura
+                [max(0.05, st.session_state.doc_por_tipo * 0.5), 
+                 min(0.50, st.session_state.doc_por_tipo * 1.5)],  # Variação de ±50% em torno do DOC
             ]
         }
 
@@ -1051,7 +1310,7 @@ if st.session_state.get('run_simulation', False):
 
         fig, ax = plt.subplots(figsize=(10, 6))
         sns.barplot(x='ST', y='Parâmetro', data=sensibilidade_df_unfccc, palette='viridis', ax=ax)
-        ax.set_title('Sensibilidade Global - Cenário UNFCCC (k substitui Umidade)')
+        ax.set_title('Sensibilidade Global - Cenário UNFCCC (baseado em IPCC 2006)')
         ax.set_xlabel('Índice ST (Sobol Total)')
         ax.set_ylabel('Parâmetro')
         ax.grid(axis='x', linestyle='--', alpha=0.7)
@@ -1064,7 +1323,7 @@ if st.session_state.get('run_simulation', False):
         st.pyplot(fig)
 
         # =============================================================================
-        # ANÁLISE DE INCERTEZA (MONTE CARLO) - MANTIDA COMO ORIGINAL
+        # ANÁLISE DE INCERTEZA (MONTE CARLO) - MANTIDA COM AJUSTES
         # =============================================================================
         
         # Análise de Incerteza (Monte Carlo) - PROPOSTA DA TESE
@@ -1192,12 +1451,11 @@ if st.session_state.get('run_simulation', False):
         st.dataframe(df_comp_formatado)
 
 else:
-    st.info("💡 Ajuste os parâmetros na barra lateral e clique em 'Executar Simulação' para ver os resultados.")
+    st.info("💡 Ajuste os parâmetros na barra lateral e clique em 'Calcular Taxa de Decaimento' e depois 'Executar Simulação' para ver os resultados.")
 
 # Rodapé
 st.markdown("---")
 st.markdown("""
-
 **📚 Referências por Cenário:**
 
 **Cenário de Baseline (Aterro Sanitário):**
@@ -1211,4 +1469,8 @@ st.markdown("""
 **Cenário UNFCCC (Compostagem sem minhocas a céu aberto):**
 - Protocolo AMS-III.F: UNFCCC (2016)
 - Fatores de emissões: Yang et al. (2017)
+
+**📊 Taxas de Decaimento (k):**
+- Valores baseados em IPCC 2006 Guidelines for National Greenhouse Gas Inventories, Volume 5, Tabela 3.3
+- Documento de referência: AMS-III.F (Version 08.1)
 """)
