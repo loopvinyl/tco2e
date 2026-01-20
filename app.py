@@ -27,7 +27,7 @@ plt.rcParams['font.size'] = 10
 sns.set_style("whitegrid")
 
 # =============================================================================
-# FUNÇÕES DE COTAÇÃO AUTOMÁTICA DO CARBONO E CÂMBIO (AGORA DEFINIDAS PRIMEIRO)
+# FUNÇÕES DE COTAÇÃO AUTOMÁTICA DO CARBONO E CÂMBIO
 # =============================================================================
 
 def obter_cotacao_carbono_investing():
@@ -245,7 +245,7 @@ def exibir_cotacao_carbono():
         """)
 
 # =============================================================================
-# INICIALIZAÇÃO DA SESSION STATE (AGORA DEPOIS DAS FUNÇÕES DE COTAÇÃO)
+# INICIALIZAÇÃO DA SESSION STATE
 # =============================================================================
 
 # Inicializar todas as variáveis de session state necessárias
@@ -337,13 +337,13 @@ Esta ferramenta projeta os Créditos de Carbono ao calcular as emissões de gase
 """)
 
 # =============================================================================
-# SIDEBAR COM PARÂMETROS
+# SIDEBAR COM PARÂMETROS REFINADOS
 # =============================================================================
 
-# Seção de cotação do carbono - AGORA ATUALIZADA AUTOMATICAMENTE
+# Seção de cotação do carbono
 exibir_cotacao_carbono()
 
-# Seção original de parâmetros
+# Seção refinada de parâmetros - APENAS OS QUE SÃO SIMULADOS NA ANÁLISE SOBOL
 with st.sidebar:
     st.header("⚙️ Parâmetros de Entrada")
     
@@ -352,23 +352,13 @@ with st.sidebar:
                                min_value=10, max_value=1000, value=100, step=10,
                                help="Quantidade diária de resíduos orgânicos gerados")
     
-    st.subheader("📊 Parâmetros Operacionais")
+    st.subheader("📊 Parâmetros da Análise Sobol")
+    st.info("Estes são os parâmetros variados na análise de sensibilidade Sobol")
     
-    # Umidade com formatação brasileira (0,85 em vez de 0.85)
-    umidade_valor = st.slider("Umidade do resíduo (%)", 50, 95, 85, 1,
-                             help="Percentual de umidade dos resíduos orgânicos")
-    umidade = umidade_valor / 100.0
-    st.write(f"**Umidade selecionada:** {formatar_br(umidade_valor)}%")
+    # PARÂMETROS QUE SÃO SIMULADOS NA ANÁLISE SOBOL
     
-    massa_exposta_kg = st.slider("Massa exposta na frente de trabalho (kg)", 50, 200, 100, 10,
-                                help="Massa de resíduos exposta diariamente para tratamento")
-    h_exposta = st.slider("Horas expostas por dia", 4, 24, 8, 1,
-                         help="Horas diárias de exposição dos resíduos")
-    
-    # ADIÇÃO: Seletor para taxa de decaimento (k) com duas opções específicas
-    st.subheader("📉 Taxa de Decaimento do Aterro")
-    
-    # Seletor para escolher entre os dois valores específicos
+    # 1. Taxa de decaimento (k) - PRINCIPAL PARÂMETRO DA ANÁLISE SOBOL
+    st.markdown("**1. Taxa de Decaimento do Aterro**")
     opcao_k = st.selectbox(
         "Selecione a taxa de decaimento (k)",
         options=[
@@ -376,7 +366,7 @@ with st.sidebar:
             "k = 0.40 ano⁻¹ (decaimento rápido)"
         ],
         index=0,
-        help="Selecione entre as duas taxas de decaimento para simulação do aterro"
+        help="Taxa de decaimento para simulação do aterro - VARIA NA ANÁLISE SOBOL"
     )
     
     # Definir k_ano com base na seleção
@@ -386,18 +376,48 @@ with st.sidebar:
         k_ano = 0.06
     
     st.session_state.k_ano = k_ano
-    st.write(f"**Taxa de decaimento selecionada:** {formatar_br(k_ano)} ano⁻¹")
+    st.write(f"**Valor selecionado:** {formatar_br(k_ano)} ano⁻¹")
     
-    # Explicação sobre as taxas
-    with st.expander("ℹ️ Sobre as taxas de decaimento"):
+    # 2. Temperatura (T) - SEGUNDO PARÂMETRO DA ANÁLISE SOBOL
+    st.markdown("**2. Temperatura Média**")
+    T = st.slider("Temperatura média (°C)", 
+                 min_value=20, max_value=40, value=25, step=1,
+                 help="Temperatura média ambiente - VARIA NA ANÁLISE SOBOL (25-45°C)")
+    st.write(f"**Valor selecionado:** {formatar_br(T)} °C")
+    
+    # 3. Carbono orgânico degradável (DOC) - TERCEIRO PARÂMETRO DA ANÁLISE SOBOL
+    st.markdown("**3. Carbono Orgânico Degradável**")
+    DOC = st.slider("DOC (fração)", 
+                   min_value=0.10, max_value=0.25, value=0.15, step=0.01,
+                   help="Fração de carbono orgânico degradável - VARIA NA ANÁLISE SOBOL (0.15-0.25)")
+    st.write(f"**Valor selecionado:** {formatar_br(DOC)}")
+    
+    # 4. Umidade - PARÂMETRO FIXO (NÃO VARIA NA ANÁLISE SOBOL)
+    st.markdown("**4. Umidade do Resíduo**")
+    umidade_valor = st.slider("Umidade do resíduo (%)", 50, 95, 85, 1,
+                             help="Percentual de umidade dos resíduos orgânicos - PARÂMETRO FIXO")
+    umidade = umidade_valor / 100.0
+    st.write(f"**Valor fixo:** {formatar_br(umidade_valor)}%")
+    
+    # Explicação sobre os parâmetros Sobol
+    with st.expander("ℹ️ Sobre os parâmetros da análise Sobol"):
         st.markdown("""
-        **Taxas de decaimento (k):**
-        - **k = 0.06 ano⁻¹**: Decaimento lento, típico de aterros com baixa taxa de degradação
-        - **k = 0.40 ano⁻¹**: Decaimento rápido, típico de aterros com alta taxa de degradação
+        **📊 Parâmetros variados na análise de sensibilidade Sobol:**
         
-        **Impacto na simulação:**
-        - Taxas mais altas (k = 0.40) resultam em emissões mais concentradas no início
-        - Taxas mais baixas (k = 0.06) resultam em emissões mais distribuídas ao longo do tempo
+        1. **Taxa de decaimento (k):** 0.06 a 0.40 ano⁻¹
+           - Controla a velocidade de degradação no aterro
+           - Valores mais altos = emissões mais concentradas no início
+        
+        2. **Temperatura (T):** 25 a 45°C
+           - Influencia a taxa de decomposição
+           - Temperaturas mais altas aumentam as emissões
+        
+        3. **Carbono orgânico degradável (DOC):** 0.15 a 0.25
+           - Fração do carbono que pode ser degradada
+           - Valores mais altos = maior potencial de emissões
+        
+        **⚙️ Parâmetro fixo (não varia):**
+        - **Umidade:** 85% (valor fixo da simulação)
         """)
     
     st.subheader("🎯 Configuração de Simulação")
@@ -415,9 +435,9 @@ with st.sidebar:
 # PARÂMETROS FIXOS (DO CÓDIGO ORIGINAL)
 # =============================================================================
 
-T = 25  # Temperatura média (ºC)
-DOC = 0.15  # Carbono orgânico degradável (fração)
-DOCf_val = 0.0147 * T + 0.28
+# NOTA: T e DOC agora vêm do sidebar, não são mais fixos
+# Valores fixos que não são simulados na análise Sobol
+DOCf_val = 0.0147 * T + 0.28  # Calculado a partir da temperatura do sidebar
 MCF = 1  # Fator de correção de metano
 F = 0.5  # Fração de metano no biogás
 OX = 0.1  # Fator de oxidação
@@ -521,6 +541,15 @@ PERFIL_N2O_THERMO = np.array([
     0.001, 0.001, 0.001, 0.001, 0.001,   # Dias 46-50
 ])
 PERFIL_N2O_THERMO /= PERFIL_N2O_THERMO.sum()
+
+# =============================================================================
+# PARÂMETROS OPERACIONAIS FIXOS (REMOVIDOS DO SIDEBAR)
+# =============================================================================
+# Estes parâmetros foram removidos do sidebar pois não são simulados na análise Sobol
+# Eles são mantidos como valores fixos no código
+
+massa_exposta_kg = 100  # kg (valor fixo - foi removido do sidebar)
+h_exposta = 8  # horas (valor fixo - foi removido do sidebar)
 
 # =============================================================================
 # FUNÇÕES DE CÁLCULO (ADAPTADAS DO SCRIPT ANEXO)
@@ -749,17 +778,21 @@ if st.session_state.get('run_simulation', False):
         df_comp_anual_revisado.rename(columns={'Total_Compost_tCO2eq_dia': 'Project emissions (t CO₂eq)'}, inplace=True)
 
         # =============================================================================
-        # EXIBIÇÃO DOS RESULTADOS COM COTAÇÃO DO CARBONO E REAL
+        # EXIBIÇÃO DOS RESULTADOS
         # =============================================================================
 
         # Exibir resultados
         st.header("📈 Resultados da Simulação")
         
-        # Informação sobre o k atual
-        if k_ano == 0.06:
-            st.info(f"**Taxa de decaimento utilizada:** {formatar_br(k_ano)} ano⁻¹ (DECAIMENTO LENTO)")
-        else:
-            st.info(f"**Taxa de decaimento utilizada:** {formatar_br(k_ano)} ano⁻¹ (DECAIMENTO RÁPIDO)")
+        # Informação sobre os parâmetros utilizados
+        st.info(f"""
+        **Parâmetros utilizados na simulação:**
+        - **Taxa de decaimento (k):** {formatar_br(k_ano)} ano⁻¹
+        - **Temperatura (T):** {formatar_br(T)} °C
+        - **DOC:** {formatar_br(DOC)}
+        - **Umidade:** {formatar_br(umidade_valor)}%
+        - **Resíduos/dia:** {formatar_br(residuos_kg_dia)} kg
+        """)
         
         # Obter valores totais
         total_evitado_tese = df['Reducao_tCO2eq_acum'].iloc[-1]
@@ -849,10 +882,10 @@ if st.session_state.get('run_simulation', False):
             """)
         
         # =============================================================================
-        # SEÇÃO ATUALIZADA: RESUMO DAS EMISSÕES EVITADAS COM MÉTRICAS ANUAIS REORGANIZADAS
+        # SEÇÃO ATUALIZADA: RESUMO DAS EMISSÕES EVITADAS
         # =============================================================================
         
-        # Métricas de emissões evitadas - layout reorganizado
+        # Métricas de emissões evitadas
         st.subheader("📊 Resumo das Emissões Evitadas")
         
         # Calcular médias anuais
@@ -887,28 +920,6 @@ if st.session_state.get('run_simulation', False):
                 f"{formatar_br(media_anual_unfccc)} tCO₂eq/ano",
                 help=f"Emissões evitadas por ano em média"
             )
-
-        # Adicionar explicação sobre as métricas anuais
-        with st.expander("💡 Entenda as métricas anuais"):
-            st.markdown(f"""
-            **📊 Como interpretar as métricas anuais:**
-            
-            **Metodologia da Tese:**
-            - **Total em {anos_simulacao} anos:** {formatar_br(total_evitado_tese)} tCO₂eq
-            - **Média anual:** {formatar_br(media_anual_tese)} tCO₂eq/ano
-            - Equivale a aproximadamente **{formatar_br(media_anual_tese / 365)} tCO₂eq/dia**
-            
-            **Metodologia UNFCCC:**
-            - **Total em {anos_simulacao} anos:** {formatar_br(total_evitado_unfccc)} tCO₂eq
-            - **Média anual:** {formatar_br(media_anual_unfccc)} tCO₂eq/ano
-            - Equivale a aproximadamente **{formatar_br(media_anual_unfccc / 365)} tCO₂eq/dia**
-            
-            **💡 Significado prático:**
-            - As métricas anuais ajudam a planejar projetos de longo prazo
-            - Permitem comparar com metas anuais de redução de emissões
-            - Facilitam o cálculo de retorno financeiro anual
-            - A média anual representa o desempenho constante do projeto
-            """)
 
         # Gráfico comparativo
         st.subheader("📊 Comparação Anual das Emissões Evitadas")
@@ -966,12 +977,12 @@ if st.session_state.get('run_simulation', False):
         st.pyplot(fig)
 
         # =============================================================================
-        # ANÁLISE DE SENSIBILIDADE GLOBAL (SOBOL) MODIFICADA - COM TAXA DE DECAIMENTO
+        # ANÁLISE DE SENSIBILIDADE GLOBAL (SOBOL) MODIFICADA
         # =============================================================================
         
-        # Análise de Sensibilidade Global (Sobol) - PROPOSTA DA TESE (COM TAXA DE DECAIMENTO)
+        # Análise de Sensibilidade Global (Sobol) - PROPOSTA DA TESE
         st.subheader("🎯 Análise de Sensibilidade Global (Sobol) - Proposta da Tese")
-        st.info("**ATUALIZAÇÃO:** Análise agora inclui Taxa de Decaimento (k) em vez de Umidade")
+        st.info("**Parâmetros variados na análise:** Taxa de Decaimento (k), Temperatura (T), DOC")
         br_formatter_sobol = FuncFormatter(br_format)
 
         np.random.seed(50)  
@@ -1007,7 +1018,7 @@ if st.session_state.get('run_simulation', False):
 
         fig, ax = plt.subplots(figsize=(10, 6))
         sns.barplot(x='ST', y='Parâmetro', data=sensibilidade_df_tese, palette='viridis', ax=ax)
-        ax.set_title('Sensibilidade Global - Proposta da Tese (k substitui Umidade)')
+        ax.set_title('Sensibilidade Global - Proposta da Tese')
         ax.set_xlabel('Índice ST (Sobol Total)')
         ax.set_ylabel('Parâmetro')
         ax.grid(axis='x', linestyle='--', alpha=0.7)
@@ -1019,9 +1030,9 @@ if st.session_state.get('run_simulation', False):
         
         st.pyplot(fig)
 
-        # Análise de Sensibilidade Global (Sobol) - CENÁRIO UNFCCC (COM TAXA DE DECAIMENTO)
+        # Análise de Sensibilidade Global (Sobol) - CENÁRIO UNFCCC
         st.subheader("🎯 Análise de Sensibilidade Global (Sobol) - Cenário UNFCCC")
-        st.info("**ATUALIZAÇÃO:** Análise agora inclui Taxa de Decaimento (k) em vez de Umidade")
+        st.info("**Parâmetros variados na análise:** Taxa de Decaimento (k), Temperatura (T), DOC")
 
         np.random.seed(50)
         
@@ -1051,7 +1062,7 @@ if st.session_state.get('run_simulation', False):
 
         fig, ax = plt.subplots(figsize=(10, 6))
         sns.barplot(x='ST', y='Parâmetro', data=sensibilidade_df_unfccc, palette='viridis', ax=ax)
-        ax.set_title('Sensibilidade Global - Cenário UNFCCC (k substitui Umidade)')
+        ax.set_title('Sensibilidade Global - Cenário UNFCCC')
         ax.set_xlabel('Índice ST (Sobol Total)')
         ax.set_ylabel('Parâmetro')
         ax.grid(axis='x', linestyle='--', alpha=0.7)
