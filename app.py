@@ -548,7 +548,8 @@ PERFIL_N2O_THERMO /= PERFIL_N2O_THERMO.sum()
 # Estes parâmetros foram removidos do sidebar pois não são simulados na análise Sobol
 # Eles são mantidos como valores fixos no código
 
-massa_exposta_kg = 100  # kg (valor fixo - foi removido do sidebar)
+# CORREÇÃO: A frente exposta deve ser igual à quantidade de resíduos do dia
+massa_exposta_kg = residuos_kg_dia  # CORREÇÃO: igual aos resíduos diários
 h_exposta = 8  # horas (valor fixo - foi removido do sidebar)
 
 # =============================================================================
@@ -590,6 +591,7 @@ def calcular_emissoes_aterro(params, k_ano, dias_simulacao=dias):
     umidade_val, temp_val, doc_val = params
 
     fator_umid = (1 - umidade_val) / (1 - 0.55)
+    # CORREÇÃO: Agora massa_exposta_kg = residuos_kg_dia, então f_aberto = h_exposta/24
     f_aberto = np.clip((massa_exposta_kg / residuos_kg_dia) * (h_exposta / 24), 0.0, 1.0)
     docf_calc = 0.0147 * temp_val + 0.28
 
@@ -792,6 +794,8 @@ if st.session_state.get('run_simulation', False):
         - **DOC:** {formatar_br(DOC)}
         - **Umidade:** {formatar_br(umidade_valor)}%
         - **Resíduos/dia:** {formatar_br(residuos_kg_dia)} kg
+        - **Frente exposta:** {formatar_br(massa_exposta_kg)} kg (igual aos resíduos/dia)
+        - **Horas expostas/dia:** {formatar_br(h_exposta)} horas
         """)
         
         # Obter valores totais
