@@ -14,9 +14,8 @@ from matplotlib.ticker import FuncFormatter
 from SALib.sample.sobol import sample
 from SALib.analyze.sobol import analyze
 
-np.random.seed(50)  # Garante reprodutibilidade
+np.random.seed(50)
 
-# Configurações iniciais
 st.set_page_config(page_title="Simulador de Emissões de tCO₂eq e Cálculo de Créditos de Carbono com Análise de Sensibilidade Global", layout="wide")
 warnings.filterwarnings("ignore", category=FutureWarning)
 pd.set_option('display.max_columns', None)
@@ -26,14 +25,7 @@ plt.rcParams['figure.dpi'] = 150
 plt.rcParams['font.size'] = 10
 sns.set_style("whitegrid")
 
-# =============================================================================
-# FUNÇÕES DE COTAÇÃO AUTOMÁTICA DO CARBONO E CÂMBIO
-# =============================================================================
-
 def obter_cotacao_carbono_investing():
-    """
-    Obtém a cotação em tempo real do carbono via web scraping do Investing.com
-    """
     try:
         url = "https://www.investing.com/commodities/carbon-emissions"
         headers = {
@@ -48,7 +40,6 @@ def obter_cotacao_carbono_investing():
         
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # Várias estratégias para encontrar o preço
         selectores = [
             '[data-test="instrument-price-last"]',
             '.text-2xl',
@@ -68,7 +59,6 @@ def obter_cotacao_carbono_investing():
                 elemento = soup.select_one(seletor)
                 if elemento:
                     texto_preco = elemento.text.strip().replace(',', '')
-                    # Remover caracteres não numéricos exceto ponto
                     texto_preco = ''.join(c for c in texto_preco if c.isdigit() or c == '.')
                     if texto_preco:
                         preco = float(texto_preco)
@@ -79,7 +69,6 @@ def obter_cotacao_carbono_investing():
         if preco is not None:
             return preco, "€", "Carbon Emissions Future", True, fonte
         
-        # Tentativa alternativa: procurar por padrões numéricos no HTML
         import re
         padroes_preco = [
             r'"last":"([\d,]+)"',
@@ -95,7 +84,7 @@ def obter_cotacao_carbono_investing():
                 try:
                     preco_texto = match.replace(',', '')
                     preco = float(preco_texto)
-                    if 50 < preco < 200:  # Faixa razoável para carbono
+                    if 50 < preco < 200:
                         return preco, "€", "Carbon Emissions Future", True, fonte
                 except ValueError:
                     continue
@@ -106,24 +95,15 @@ def obter_cotacao_carbono_investing():
         return None, None, None, False, f"Investing.com - Erro: {str(e)}"
 
 def obter_cotacao_carbono():
-    """
-    Obtém a cotação em tempo real do carbono - usa apenas Investing.com
-    """
-    # Tentar via Investing.com
     preco, moeda, contrato_info, sucesso, fonte = obter_cotacao_carbono_investing()
     
     if sucesso:
         return preco, moeda, f"{contrato_info}", True, fonte
     
-    # Fallback para valor padrão
     return 85.50, "€", "Carbon Emissions (Referência)", False, "Referência"
 
 def obter_cotacao_euro_real():
-    """
-    Obtém a cotação em tempo real do Euro em relação ao Real Brasileiro
-    """
     try:
-        # API do BCB
         url = "https://economia.awesomeapi.com.br/last/EUR-BRL"
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
@@ -134,7 +114,6 @@ def obter_cotacao_euro_real():
         pass
     
     try:
-        # Fallback para API alternativa
         url = "https://api.exchangerate-api.com/v4/latest/EUR"
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
@@ -144,72 +123,55 @@ def obter_cotacao_euro_real():
     except:
         pass
     
-    # Fallback para valor de referência
     return 5.50, "R$", False, "Referência"
 
 def calcular_valor_creditos(emissoes_evitadas_tco2eq, preco_carbono_por_tonelada, moeda, taxa_cambio=1):
-    """
-    Calcula o valor financeiro das emissões evitadas baseado no preço do carbono
-    """
     valor_total = emissoes_evitadas_tco2eq * preco_carbono_por_tonelada * taxa_cambio
     return valor_total
 
 def exibir_cotacao_carbono():
-    """
-    Exibe a cotação do carbono com informações - ATUALIZADA AUTOMATICAMENTE
-    """
     st.sidebar.header("💰 Mercado de Carbono e Câmbio")
     
-    # Atualização automática na primeira execução
     if not st.session_state.get('cotacao_carregada', False):
         st.session_state.mostrar_atualizacao = True
         st.session_state.cotacao_carregada = True
     
-    # Botão para atualizar cotações
     col1, col2 = st.sidebar.columns([3, 1])
     with col1:
         if st.button("🔄 Atualizar Cotações", key="atualizar_cotacoes"):
             st.session_state.cotacao_atualizada = True
             st.session_state.mostrar_atualizacao = True
     
-    # Mostrar mensagem de atualização se necessário
     if st.session_state.get('mostrar_atualizacao', False):
         st.sidebar.info("🔄 Atualizando cotações...")
         
-        # Obter cotação do carbono
         preco_carbono, moeda, contrato_info, sucesso_carbono, fonte_carbono = obter_cotacao_carbono()
         
-        # Obter cotação do Euro
         preco_euro, moeda_real, sucesso_euro, fonte_euro = obter_cotacao_euro_real()
         
-        # Atualizar session state
         st.session_state.preco_carbono = preco_carbono
         st.session_state.moeda_carbono = moeda
         st.session_state.taxa_cambio = preco_euro
         st.session_state.moeda_real = moeda_real
         st.session_state.fonte_cotacao = fonte_carbono
         
-        # Resetar flags
         st.session_state.mostrar_atualizacao = False
         st.session_state.cotacao_atualizada = False
         
         st.rerun()
 
-    # Exibe cotação atual do carbono com formatação brasileira
     st.sidebar.metric(
         label=f"Preço do Carbono (tCO₂eq)",
         value=f"{st.session_state.moeda_carbono} {formatar_br(st.session_state.preco_carbono)}",
         help=f"Fonte: {st.session_state.fonte_cotacao}"
     )
     
-    # Exibe cotação atual do Euro com formatação brasileira
     st.sidebar.metric(
         label="Euro (EUR/BRL)",
         value=f"{st.session_state.moeda_real} {formatar_br(st.session_state.taxa_cambio)}",
         help="Cotação do Euro em Reais Brasileiros"
     )
     
-    # Calcular preço do carbono em Reais com formatação brasileira
     preco_carbono_reais = st.session_state.preco_carbono * st.session_state.taxa_cambio
     
     st.sidebar.metric(
@@ -218,7 +180,6 @@ def exibir_cotacao_carbono():
         help="Preço do carbono convertido para Reais Brasileiros"
     )
     
-    # Informações adicionais
     with st.sidebar.expander("ℹ️ Informações do Mercado de Carbono"):
         st.markdown(f"""
         **📊 Cotações Atuais:**
@@ -244,21 +205,14 @@ def exibir_cotacao_carbono():
         - Conversão para Real utilizando câmbio comercial
         """)
 
-# =============================================================================
-# INICIALIZAÇÃO DA SESSION STATE
-# =============================================================================
-
-# Inicializar todas as variáveis de session state necessárias
 def inicializar_session_state():
     if 'preco_carbono' not in st.session_state:
-        # Buscar cotação automaticamente na inicialização
         preco_carbono, moeda, contrato_info, sucesso, fonte = obter_cotacao_carbono()
         st.session_state.preco_carbono = preco_carbono
         st.session_state.moeda_carbono = moeda
         st.session_state.fonte_cotacao = fonte
         
     if 'taxa_cambio' not in st.session_state:
-        # Buscar cotação do Euro automaticamente
         preco_euro, moeda_real, sucesso_euro, fonte_euro = obter_cotacao_euro_real()
         st.session_state.taxa_cambio = preco_euro
         st.session_state.moeda_real = moeda_real
@@ -274,90 +228,52 @@ def inicializar_session_state():
     if 'cotacao_carregada' not in st.session_state:
         st.session_state.cotacao_carregada = False
     if 'k_ano' not in st.session_state:
-        st.session_state.k_ano = 0.06  # Valor padrão
+        st.session_state.k_ano = 0.06
 
-# Chamar a inicialização
 inicializar_session_state()
 
-# =============================================================================
-# FUNÇÕES ORIGINAIS DO SEU SCRIPT
-# =============================================================================
-
-# Função para formatar números no padrão brasileiro
 def formatar_br(numero):
-    """
-    Formata números no padrão brasileiro: 1.234,56
-    """
     if pd.isna(numero):
         return "N/A"
     
-    # Arredonda para 2 casas decimais
     numero = round(numero, 2)
     
-    # Formata como string e substitui o ponto pela vírgula
     return f"{numero:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-# Função para formatar com número específico de casas decimais
 def formatar_br_dec(numero, decimais=2):
-    """
-    Formata números no padrão brasileiro com número específico de casas decimais
-    """
     if pd.isna(numero):
         return "N/A"
     
-    # Arredonda para o número de casas decimais especificado
     numero = round(numero, decimais)
     
-    # Formata como string e substitui o ponto pela vírgula
     return f"{numero:,.{decimais}f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-# Função de formatação para os gráficos
 def br_format(x, pos):
-    """
-    Função de formatação para eixos de gráficos (padrão brasileiro)
-    """
     if x == 0:
         return "0"
     
-    # Para valores muito pequenos, usa notação científica
     if abs(x) < 0.01:
         return f"{x:.1e}".replace(".", ",")
     
-    # Para valores grandes, formata com separador de milhar
     if abs(x) >= 1000:
         return f"{x:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
-    # Para valores menores, mostra duas casas decimais
     return f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-# Título do aplicativo
 st.title("Simulador de Emissões de tCO₂eq e Cálculo de Créditos de Carbono com Análise de Sensibilidade Global")
-st.markdown("""
-Esta ferramenta projeta os Créditos de Carbono ao calcular as emissões de gases de efeito estufa para dois contextos de gestão de resíduos
-""")
+st.markdown("Esta ferramenta projeta os Créditos de Carbono ao calcular as emissões de gases de efeito estufa para dois contextos de gestão de resíduos")
 
-# =============================================================================
-# SIDEBAR COM PARÂMETROS REFINADOS
-# =============================================================================
-
-# Seção de cotação do carbono
 exibir_cotacao_carbono()
 
-# Seção refinada de parâmetros - APENAS OS QUE SÃO SIMULADOS NA ANÁLISE SOBOL
 with st.sidebar:
     st.header("⚙️ Parâmetros de Entrada")
     
-    # Entrada principal de resíduos
     residuos_kg_dia = st.slider("Quantidade de resíduos (kg/dia)", 
-                               min_value=10, max_value=1000, value=100, step=10,
-                               help="Quantidade diária de resíduos orgânicos gerados")
+                               min_value=10, max_value=1000, value=100, step=10)
     
     st.subheader("📊 Parâmetros da Análise Sobol")
     st.info("Estes são os parâmetros variados na análise de sensibilidade Sobol")
     
-    # PARÂMETROS QUE SÃO SIMULADOS NA ANÁLISE SOBOL
-    
-    # 1. Taxa de decaimento (k) - PRINCIPAL PARÂMETRO DA ANÁLISE SOBOL
     st.markdown("**1. Taxa de Decaimento do Aterro**")
     opcao_k = st.selectbox(
         "Selecione a taxa de decaimento (k)",
@@ -365,11 +281,9 @@ with st.sidebar:
             "k = 0.06 ano⁻¹ (decaimento lento - valor padrão)",
             "k = 0.40 ano⁻¹ (decaimento rápido)"
         ],
-        index=0,
-        help="Taxa de decaimento para simulação do aterro - VARIA NA ANÁLISE SOBOL"
+        index=0
     )
     
-    # Definir k_ano com base na seleção
     if "0.40" in opcao_k:
         k_ano = 0.40
     else:
@@ -378,28 +292,21 @@ with st.sidebar:
     st.session_state.k_ano = k_ano
     st.write(f"**Valor selecionado:** {formatar_br(k_ano)} ano⁻¹")
     
-    # 2. Temperatura (T) - SEGUNDO PARÂMETRO DA ANÁLISE SOBOL
     st.markdown("**2. Temperatura Média**")
     T = st.slider("Temperatura média (°C)", 
-                 min_value=20, max_value=40, value=25, step=1,
-                 help="Temperatura média ambiente - VARIA NA ANÁLISE SOBOL (25-45°C)")
+                 min_value=20, max_value=40, value=25, step=1)
     st.write(f"**Valor selecionado:** {formatar_br(T)} °C")
     
-    # 3. Carbono orgânico degradável (DOC) - TERCEIRO PARÂMETRO DA ANÁLISE SOBOL
     st.markdown("**3. Carbono Orgânico Degradável**")
     DOC = st.slider("DOC (fração)", 
-                   min_value=0.10, max_value=0.25, value=0.15, step=0.01,
-                   help="Fração de carbono orgânico degradável - VARIA NA ANÁLISE SOBOL (0.15-0.25)")
+                   min_value=0.10, max_value=0.25, value=0.15, step=0.01)
     st.write(f"**Valor selecionado:** {formatar_br(DOC)}")
     
-    # 4. Umidade - PARÂMETRO FIXO (NÃO VARIA NA ANÁLISE SOBOL)
     st.markdown("**4. Umidade do Resíduo**")
-    umidade_valor = st.slider("Umidade do resíduo (%)", 50, 95, 85, 1,
-                             help="Percentual de umidade dos resíduos orgânicos - PARÂMETRO FIXO")
+    umidade_valor = st.slider("Umidade do resíduo (%)", 50, 95, 85, 1)
     umidade = umidade_valor / 100.0
     st.write(f"**Valor fixo:** {formatar_br(umidade_valor)}%")
     
-    # Explicação sobre os parâmetros Sobol
     with st.expander("ℹ️ Sobre os parâmetros da análise Sobol"):
         st.markdown("""
         **📊 Parâmetros variados na análise de sensibilidade Sobol:**
@@ -421,68 +328,55 @@ with st.sidebar:
         """)
     
     st.subheader("🎯 Configuração de Simulação")
-    anos_simulacao = st.slider("Anos de simulação", 5, 50, 20, 5,
-                              help="Período total da simulação em anos")
-    n_simulations = st.slider("Número de simulações Monte Carlo", 50, 1000, 100, 50,
-                             help="Número de iterações para análise de incerteza")
-    n_samples = st.slider("Número de amostras Sobol", 32, 256, 64, 16,
-                         help="Número de amostras para análise de sensibilidade")
+    anos_simulacao = st.slider("Anos de simulação", 5, 50, 20, 5)
+    n_simulations = st.slider("Número de simulações Monte Carlo", 50, 1000, 100, 50)
+    n_samples = st.slider("Número de amostras Sobol", 32, 256, 64, 16)
     
     if st.button("🚀 Executar Simulação", type="primary"):
         st.session_state.run_simulation = True
 
-# =============================================================================
-# PARÂMETROS FIXOS (DO CÓDIGO ORIGINAL)
-# =============================================================================
+DOCf_val = 0.0147 * T + 0.28
+MCF = 1
+F = 0.5
+OX = 0.1
+Ri = 0.0
 
-# NOTA: T e DOC agora vêm do sidebar, não são mais fixos
-# Valores fixos que não são simulados na análise Sobol
-DOCf_val = 0.0147 * T + 0.28  # Calculado a partir da temperatura do sidebar
-MCF = 1  # Fator de correção de metano
-F = 0.5  # Fração de metano no biogás
-OX = 0.1  # Fator de oxidação
-Ri = 0.0  # Metano recuperado
+k_ano = st.session_state.k_ano
 
-# Constante de decaimento - AGORA VEM DO SLIDER (st.session_state.k_ano)
-k_ano = st.session_state.k_ano  # Constante de decaimento anual (ajustável)
+TOC_YANG = 0.436
+TN_YANG = 14.2 / 1000
+CH4_C_FRAC_YANG = 0.13 / 100
+N2O_N_FRAC_YANG = 0.92 / 100
+DIAS_COMPOSTAGEM = 50
 
-# Vermicompostagem (Yang et al. 2017) - valores fixos
-TOC_YANG = 0.436  # Fração de carbono orgânico total
-TN_YANG = 14.2 / 1000  # Fração de nitrogênio total
-CH4_C_FRAC_YANG = 0.13 / 100  # Fração do TOC emitida como CH4-C (fixo)
-N2O_N_FRAC_YANG = 0.92 / 100  # Fração do TN emitida como N2O-N (fixo)
-DIAS_COMPOSTAGEM = 50  # Período total de compostagem
-
-# Perfil temporal de emissões baseado em Yang et al. (2017)
 PERFIL_CH4_VERMI = np.array([
-    0.02, 0.02, 0.02, 0.03, 0.03,  # Dias 1-5
-    0.04, 0.04, 0.05, 0.05, 0.06,  # Dias 6-10
-    0.07, 0.08, 0.09, 0.10, 0.09,  # Dias 11-15
-    0.08, 0.07, 0.06, 0.05, 0.04,  # Dias 16-20
-    0.03, 0.02, 0.02, 0.01, 0.01,  # Dias 21-25
-    0.01, 0.01, 0.01, 0.01, 0.01,  # Dias 26-30
-    0.005, 0.005, 0.005, 0.005, 0.005,  # Dias 31-35
-    0.005, 0.005, 0.005, 0.005, 0.005,  # Dias 36-40
-    0.002, 0.002, 0.002, 0.002, 0.002,  # Dias 41-45
-    0.001, 0.001, 0.001, 0.001, 0.001   # Dias 46-50
+    0.02, 0.02, 0.02, 0.03, 0.03,
+    0.04, 0.04, 0.05, 0.05, 0.06,
+    0.07, 0.08, 0.09, 0.10, 0.09,
+    0.08, 0.07, 0.06, 0.05, 0.04,
+    0.03, 0.02, 0.02, 0.01, 0.01,
+    0.01, 0.01, 0.01, 0.01, 0.01,
+    0.005, 0.005, 0.005, 0.005, 0.005,
+    0.005, 0.005, 0.005, 0.005, 0.005,
+    0.002, 0.002, 0.002, 0.002, 0.002,
+    0.001, 0.001, 0.001, 0.001, 0.001
 ])
 PERFIL_CH4_VERMI /= PERFIL_CH4_VERMI.sum()
 
 PERFIL_N2O_VERMI = np.array([
-    0.15, 0.10, 0.20, 0.05, 0.03,  # Dias 1-5 (pico no dia 3)
-    0.03, 0.03, 0.04, 0.05, 0.06,  # Dias 6-10
-    0.08, 0.09, 0.10, 0.08, 0.07,  # Dias 11-15
-    0.06, 0.05, 0.04, 0.03, 0.02,  # Dias 16-20
-    0.01, 0.01, 0.005, 0.005, 0.005,  # Dias 21-25
-    0.005, 0.005, 0.005, 0.005, 0.005,  # Dias 26-30
-    0.002, 0.002, 0.002, 0.002, 0.002,  # Dias 31-35
-    0.001, 0.001, 0.001, 0.001, 0.001,  # Dias 36-40
-    0.001, 0.001, 0.001, 0.001, 0.001,  # Dias 41-45
-    0.001, 0.001, 0.001, 0.001, 0.001   # Dias 46-50
+    0.15, 0.10, 0.20, 0.05, 0.03,
+    0.03, 0.03, 0.04, 0.05, 0.06,
+    0.08, 0.09, 0.10, 0.08, 0.07,
+    0.06, 0.05, 0.04, 0.03, 0.02,
+    0.01, 0.01, 0.005, 0.005, 0.005,
+    0.005, 0.005, 0.005, 0.005, 0.005,
+    0.002, 0.002, 0.002, 0.002, 0.002,
+    0.001, 0.001, 0.001, 0.001, 0.001,
+    0.001, 0.001, 0.001, 0.001, 0.001,
+    0.001, 0.001, 0.001, 0.001, 0.001
 ])
 PERFIL_N2O_VERMI /= PERFIL_N2O_VERMI.sum()
 
-# Emissões pré-descarte (Feng et al. 2020)
 CH4_pre_descarte_ugC_por_kg_h_min = 0.18
 CH4_pre_descarte_ugC_por_kg_h_max = 5.38
 CH4_pre_descarte_ugC_por_kg_h_media = 2.78
@@ -497,63 +391,49 @@ N2O_pre_descarte_g_por_kg_dia = N2O_pre_descarte_mgN_por_kg_dia * (44/28) / 1000
 
 PERFIL_N2O_PRE_DESCARTE = {1: 0.8623, 2: 0.10, 3: 0.0377}
 
-# GWP (IPCC AR6)
 GWP_CH4_20 = 79.7
 GWP_N2O_20 = 273
 
-# Período de Simulação
 dias = anos_simulacao * 365
 ano_inicio = datetime.now().year
 data_inicio = datetime(ano_inicio, 1, 1)
 datas = pd.date_range(start=data_inicio, periods=dias, freq='D')
 
-# Perfil temporal N2O (Wang et al. 2017)
 PERFIL_N2O = {1: 0.10, 2: 0.30, 3: 0.40, 4: 0.15, 5: 0.05}
 
-# Valores específicos para compostagem termofílica (Yang et al. 2017) - valores fixos
-CH4_C_FRAC_THERMO = 0.006  # Fixo
-N2O_N_FRAC_THERMO = 0.0196  # Fixo
+CH4_C_FRAC_THERMO = 0.006
+N2O_N_FRAC_THERMO = 0.0196
 
 PERFIL_CH4_THERMO = np.array([
-    0.01, 0.02, 0.03, 0.05, 0.08,  # Dias 1-5
-    0.12, 0.15, 0.18, 0.20, 0.18,  # Dias 6-10 (pico termofílico)
-    0.15, 0.12, 0.10, 0.08, 0.06,  # Dias 11-15
-    0.05, 0.04, 0.03, 0.02, 0.02,  # Dias 16-20
-    0.01, 0.01, 0.01, 0.01, 0.01,  # Dias 21-25
-    0.005, 0.005, 0.005, 0.005, 0.005,  # Dias 26-30
-    0.002, 0.002, 0.002, 0.002, 0.002,  # Dias 31-35
-    0.001, 0.001, 0.001, 0.001, 0.001,  # Dias 36-40
-    0.001, 0.001, 0.001, 0.001, 0.001,  # Dias 41-45
-    0.001, 0.001, 0.001, 0.001, 0.001   # Dias 46-50
+    0.01, 0.02, 0.03, 0.05, 0.08,
+    0.12, 0.15, 0.18, 0.20, 0.18,
+    0.15, 0.12, 0.10, 0.08, 0.06,
+    0.05, 0.04, 0.03, 0.02, 0.02,
+    0.01, 0.01, 0.01, 0.01, 0.01,
+    0.005, 0.005, 0.005, 0.005, 0.005,
+    0.002, 0.002, 0.002, 0.002, 0.002,
+    0.001, 0.001, 0.001, 0.001, 0.001,
+    0.001, 0.001, 0.001, 0.001, 0.001,
+    0.001, 0.001, 0.001, 0.001, 0.001
 ])
 PERFIL_CH4_THERMO /= PERFIL_CH4_THERMO.sum()
 
 PERFIL_N2O_THERMO = np.array([
-    0.10, 0.08, 0.15, 0.05, 0.03,  # Dias 1-5
-    0.04, 0.05, 0.07, 0.10, 0.12,  # Dias 6-10
-    0.15, 0.18, 0.20, 0.18, 0.15,  # Dias 11-15 (pico termofílico)
-    0.12, 0.10, 0.08, 0.06, 0.05,  # Dias 16-20
-    0.04, 0.03, 0.02, 0.02, 0.01,  # Dias 21-25
-    0.01, 0.01, 0.01, 0.01, 0.01,  # Dias 26-30
-    0.005, 0.005, 0.005, 0.005, 0.005,  # Dias 31-35
-    0.002, 0.002, 0.002, 0.002, 0.002,  # Dias 36-40
-    0.001, 0.001, 0.001, 0.001, 0.001,  # Dias 41-45
-    0.001, 0.001, 0.001, 0.001, 0.001,   # Dias 46-50
+    0.10, 0.08, 0.15, 0.05, 0.03,
+    0.04, 0.05, 0.07, 0.10, 0.12,
+    0.15, 0.18, 0.20, 0.18, 0.15,
+    0.12, 0.10, 0.08, 0.06, 0.05,
+    0.04, 0.03, 0.02, 0.02, 0.01,
+    0.01, 0.01, 0.01, 0.01, 0.01,
+    0.005, 0.005, 0.005, 0.005, 0.005,
+    0.002, 0.002, 0.002, 0.002, 0.002,
+    0.001, 0.001, 0.001, 0.001, 0.001,
+    0.001, 0.001, 0.001, 0.001, 0.001,
 ])
 PERFIL_N2O_THERMO /= PERFIL_N2O_THERMO.sum()
 
-# =============================================================================
-# PARÂMETROS OPERACIONAIS FIXOS (REMOVIDOS DO SIDEBAR)
-# =============================================================================
-# Estes parâmetros foram removidos do sidebar pois não são simulados na análise Sobol
-# Eles são mantidos como valores fixos no código
-
-massa_exposta_kg = 100  # kg (valor fixo - foi removido do sidebar)
-h_exposta = 8  # horas (valor fixo - foi removido do sidebar)
-
-# =============================================================================
-# FUNÇÕES DE CÁLCULO (ADAPTADAS DO SCRIPT ANEXO)
-# =============================================================================
+massa_exposta_kg = 100
+h_exposta = 8
 
 def ajustar_emissoes_pre_descarte(O2_concentracao):
     ch4_ajustado = CH4_pre_descarte_g_por_kg_dia
@@ -623,7 +503,6 @@ def calcular_emissoes_vermi(params, dias_simulacao=dias):
     umidade_val, temp_val, doc_val = params
     fracao_ms = 1 - umidade_val
     
-    # Usando valores fixos para CH4_C_FRAC_YANG e N2O_N_FRAC_YANG
     ch4_total_por_lote = residuos_kg_dia * (TOC_YANG * CH4_C_FRAC_YANG * (16/12) * fracao_ms)
     n2o_total_por_lote = residuos_kg_dia * (TN_YANG * N2O_N_FRAC_YANG * (44/28) * fracao_ms)
 
@@ -643,7 +522,6 @@ def calcular_emissoes_compostagem(params, dias_simulacao=dias, dias_compostagem=
     umidade, T, DOC = params
     fracao_ms = 1 - umidade
     
-    # Usando valores fixos para CH4_C_FRAC_THERMO e N2O_N_FRAC_THERMO
     ch4_total_por_lote = residuos_kg_dia * (TOC_YANG * CH4_C_FRAC_THERMO * (16/12) * fracao_ms)
     n2o_total_por_lote = residuos_kg_dia * (TN_YANG * N2O_N_FRAC_THERMO * (44/28) * fracao_ms)
 
@@ -659,18 +537,9 @@ def calcular_emissoes_compostagem(params, dias_simulacao=dias, dias_compostagem=
 
     return emissoes_CH4, emissoes_N2O
 
-# =============================================================================
-# FUNÇÕES MODIFICADAS PARA AS ANÁLISES SOBOL COM TAXA DE DECAIMENTO
-# =============================================================================
-
 def executar_simulacao_completa_sobol(params_sobol):
-    """
-    Função para análise Sobol - substitui umidade por taxa de decaimento
-    Parâmetros: [taxa_decaimento, T, DOC]
-    """
     k_ano_sobol, T_sobol, DOC_sobol = params_sobol
     
-    # Usar a umidade fixa do slider
     params_base = [umidade, T_sobol, DOC_sobol]
     
     ch4_aterro, n2o_aterro = calcular_emissoes_aterro(params_base, k_ano_sobol)
@@ -683,13 +552,8 @@ def executar_simulacao_completa_sobol(params_sobol):
     return reducao_tco2eq
 
 def executar_simulacao_unfccc_sobol(params_sobol):
-    """
-    Função para análise Sobol UNFCCC - substitui umidade por taxa de decaimento
-    Parâmetros: [taxa_decaimento, T, DOC]
-    """
     k_ano_sobol, T_sobol, DOC_sobol = params_sobol
     
-    # Usar a umidade fixa do slider
     params_base = [umidade, T_sobol, DOC_sobol]
 
     ch4_aterro, n2o_aterro = calcular_emissoes_aterro(params_base, k_ano_sobol)
@@ -701,23 +565,15 @@ def executar_simulacao_unfccc_sobol(params_sobol):
     reducao_tco2eq = total_aterro_tco2eq.sum() - total_compost_tco2eq.sum()
     return reducao_tco2eq
 
-# =============================================================================
-# EXECUÇÃO DA SIMULAÇÃO
-# =============================================================================
-
-# Executar simulação quando solicitado
 if st.session_state.get('run_simulation', False):
     with st.spinner('Executando simulação...'):
-        # Executar modelo base
         params_base = [umidade, T, DOC]
         
-        # Usar k_ano da session state (do seletor)
         k_ano = st.session_state.k_ano
 
         ch4_aterro_dia, n2o_aterro_dia = calcular_emissoes_aterro(params_base, k_ano)
         ch4_vermi_dia, n2o_vermi_dia = calcular_emissoes_vermi(params_base)
 
-        # Construir DataFrame
         df = pd.DataFrame({
             'Data': datas,
             'CH4_Aterro_kg_dia': ch4_aterro_dia,
@@ -736,7 +592,6 @@ if st.session_state.get('run_simulation', False):
         df['Total_Vermi_tCO2eq_acum'] = df['Total_Vermi_tCO2eq_dia'].cumsum()
         df['Reducao_tCO2eq_acum'] = df['Total_Aterro_tCO2eq_acum'] - df['Total_Vermi_tCO2eq_acum']
 
-        # Resumo anual
         df['Year'] = df['Data'].dt.year
         df_anual_revisado = df.groupby('Year').agg({
             'Total_Aterro_tCO2eq_dia': 'sum',
@@ -751,7 +606,6 @@ if st.session_state.get('run_simulation', False):
             'Total_Vermi_tCO2eq_dia': 'Project emissions (t CO₂eq)',
         }, inplace=True)
 
-        # Cenário UNFCCC
         ch4_compost_UNFCCC, n2o_compost_UNFCCC = calcular_emissoes_compostagem(
             params_base, dias_simulacao=dias, dias_compostagem=50
         )
@@ -777,14 +631,8 @@ if st.session_state.get('run_simulation', False):
         df_comp_anual_revisado['Cumulative reduction (t CO₂eq)'] = df_comp_anual_revisado['Emission reductions (t CO₂eq)'].cumsum()
         df_comp_anual_revisado.rename(columns={'Total_Compost_tCO2eq_dia': 'Project emissions (t CO₂eq)'}, inplace=True)
 
-        # =============================================================================
-        # EXIBIÇÃO DOS RESULTADOS
-        # =============================================================================
-
-        # Exibir resultados
         st.header("📈 Resultados da Simulação")
         
-        # Informação sobre os parâmetros utilizados
         st.info(f"""
         **Parâmetros utilizados na simulação:**
         - **Taxa de decaimento (k):** {formatar_br(k_ano)} ano⁻¹
@@ -794,28 +642,22 @@ if st.session_state.get('run_simulation', False):
         - **Resíduos/dia:** {formatar_br(residuos_kg_dia)} kg
         """)
         
-        # Obter valores totais
         total_evitado_tese = df['Reducao_tCO2eq_acum'].iloc[-1]
         total_evitado_unfccc = df_comp_anual_revisado['Cumulative reduction (t CO₂eq)'].iloc[-1]
         
-        # Obter preço do carbono e taxa de câmbio da session state
         preco_carbono = st.session_state.preco_carbono
         moeda = st.session_state.moeda_carbono
         taxa_cambio = st.session_state.taxa_cambio
         fonte_cotacao = st.session_state.fonte_cotacao
         
-        # Calcular valores financeiros em Euros
         valor_tese_eur = calcular_valor_creditos(total_evitado_tese, preco_carbono, moeda)
         valor_unfccc_eur = calcular_valor_creditos(total_evitado_unfccc, preco_carbono, moeda)
         
-        # Calcular valores financeiros em Reais
         valor_tese_brl = calcular_valor_creditos(total_evitado_tese, preco_carbono, "R$", taxa_cambio)
         valor_unfccc_brl = calcular_valor_creditos(total_evitado_unfccc, preco_carbono, "R$", taxa_cambio)
         
-        # NOVA SEÇÃO: VALOR FINANCEIRO DAS EMISSÕES EVITADAS
         st.subheader("💰 Valor Financeiro das Emissões Evitadas")
         
-        # Primeira linha: Euros
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric(
@@ -836,7 +678,6 @@ if st.session_state.get('run_simulation', False):
                 help=f"Baseado em {formatar_br(total_evitado_unfccc)} tCO₂eq evitadas"
             )
         
-        # Segunda linha: Reais
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric(
@@ -857,7 +698,6 @@ if st.session_state.get('run_simulation', False):
                 help=f"Baseado em {formatar_br(total_evitado_unfccc)} tCO₂eq evitadas"
             )
         
-        # Explicação sobre compra e venda
         with st.expander("💡 Como funciona a comercialização no mercado de carbono?"):
             st.markdown(f"""
             **📊 Informações de Mercado:**
@@ -881,18 +721,11 @@ if st.session_state.get('run_simulation', False):
             - Preços em tempo real do mercado regulado
             """)
         
-        # =============================================================================
-        # SEÇÃO ATUALIZADA: RESUMO DAS EMISSÕES EVITADAS
-        # =============================================================================
-        
-        # Métricas de emissões evitadas
         st.subheader("📊 Resumo das Emissões Evitadas")
         
-        # Calcular médias anuais
         media_anual_tese = total_evitado_tese / anos_simulacao
         media_anual_unfccc = total_evitado_unfccc / anos_simulacao
         
-        # Layout com duas colunas principais
         col1, col2 = st.columns(2)
 
         with col1:
@@ -921,7 +754,6 @@ if st.session_state.get('run_simulation', False):
                 help=f"Emissões evitadas por ano em média"
             )
 
-        # Gráfico comparativo
         st.subheader("📊 Comparação Anual das Emissões Evitadas")
         df_evitadas_anual = pd.DataFrame({
             'Year': df_anual_revisado['Year'],
@@ -939,7 +771,6 @@ if st.session_state.get('run_simulation', False):
         ax.bar(x + bar_width/2, df_evitadas_anual['UNFCCC (2012)'], width=bar_width,
                 label='UNFCCC (2012)', edgecolor='black', hatch='//')
 
-        # Adicionar valores formatados em cima das barras
         for i, (v1, v2) in enumerate(zip(df_evitadas_anual['Proposta da Tese'], 
                                          df_evitadas_anual['UNFCCC (2012)'])):
             ax.text(i - bar_width/2, v1 + max(v1, v2)*0.01, 
@@ -951,7 +782,6 @@ if st.session_state.get('run_simulation', False):
         ax.set_ylabel('Emissões Evitadas (t CO₂eq)')
         ax.set_title('Comparação Anual das Emissões Evitadas: Proposta da Tese vs UNFCCC (2012)')
         
-        # Ajustar o eixo x para ser igual ao do gráfico de redução acumulada
         ax.set_xticks(x)
         ax.set_xticklabels(df_anual_revisado['Year'], fontsize=8)
 
@@ -960,7 +790,6 @@ if st.session_state.get('run_simulation', False):
         ax.grid(axis='y', linestyle='--', alpha=0.7)
         st.pyplot(fig)
 
-        # Gráfico de redução acumulada
         st.subheader("📉 Redução de Emissões Acumulada")
         fig, ax = plt.subplots(figsize=(10, 6))
         ax.plot(df['Data'], df['Total_Aterro_tCO2eq_acum'], 'r-', label='Cenário Base (Aterro Sanitário)', linewidth=2)
@@ -975,26 +804,20 @@ if st.session_state.get('run_simulation', False):
         ax.yaxis.set_major_formatter(br_formatter)
 
         st.pyplot(fig)
-
-        # =============================================================================
-        # ANÁLISE DE SENSIBILIDADE GLOBAL (SOBOL) MODIFICADA
-        # =============================================================================
         
-        # Análise de Sensibilidade Global (Sobol) - PROPOSTA DA TESE
         st.subheader("🎯 Análise de Sensibilidade Global (Sobol) - Proposta da Tese")
         st.info("**Parâmetros variados na análise:** Taxa de Decaimento (k), Temperatura (T), DOC")
         br_formatter_sobol = FuncFormatter(br_format)
 
         np.random.seed(50)  
         
-        # PROBLEMA MODIFICADO: substituir umidade por taxa de decaimento
         problem_tese = {
             'num_vars': 3,
             'names': ['taxa_decaimento', 'T', 'DOC'],
             'bounds': [
-                [0.06, 0.40],        # taxa de decaimento (k) - substitui umidade
-                [25.0, 45.0],        # temperatura
-                [0.15, 0.25],        # doc
+                [0.06, 0.40],
+                [25.0, 45.0],
+                [0.15, 0.25],
             ]
         }
 
@@ -1008,7 +831,6 @@ if st.session_state.get('run_simulation', False):
             'ST': Si_tese['ST']
         }).sort_values('ST', ascending=False)
 
-        # Mapear nomes para exibição mais amigável
         nomes_amigaveis = {
             'taxa_decaimento': 'Taxa de Decaimento (k)',
             'T': 'Temperatura',
@@ -1024,26 +846,23 @@ if st.session_state.get('run_simulation', False):
         ax.grid(axis='x', linestyle='--', alpha=0.7)
         ax.xaxis.set_major_formatter(br_formatter_sobol)
         
-        # Adicionar valores nas barras
         for i, (st_value) in enumerate(sensibilidade_df_tese['ST']):
             ax.text(st_value, i, f' {formatar_br(st_value)}', va='center', fontweight='bold')
         
         st.pyplot(fig)
 
-        # Análise de Sensibilidade Global (Sobol) - CENÁRIO UNFCCC
         st.subheader("🎯 Análise de Sensibilidade Global (Sobol) - Cenário UNFCCC")
         st.info("**Parâmetros variados na análise:** Taxa de Decaimento (k), Temperatura (T), DOC")
 
         np.random.seed(50)
         
-        # PROBLEMA MODIFICADO: substituir umidade por taxa de decaimento
         problem_unfccc = {
             'num_vars': 3,
             'names': ['taxa_decaimento', 'T', 'DOC'],
             'bounds': [
-                [0.06, 0.40],  # Taxa de Decaimento (k) - substitui Umidade
-                [25, 45],      # Temperatura
-                [0.15, 0.25],  # DOC
+                [0.06, 0.40],
+                [25, 45],
+                [0.15, 0.25],
             ]
         }
 
@@ -1057,7 +876,6 @@ if st.session_state.get('run_simulation', False):
             'ST': Si_unfccc['ST']
         }).sort_values('ST', ascending=False)
 
-        # Mapear nomes para exibição mais amigável
         sensibilidade_df_unfccc['Parâmetro'] = sensibilidade_df_unfccc['Parâmetro'].map(nomes_amigaveis)
 
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -1068,17 +886,11 @@ if st.session_state.get('run_simulation', False):
         ax.grid(axis='x', linestyle='--', alpha=0.7)
         ax.xaxis.set_major_formatter(br_formatter_sobol)
         
-        # Adicionar valores nas barras
         for i, (st_value) in enumerate(sensibilidade_df_unfccc['ST']):
             ax.text(st_value, i, f' {formatar_br(st_value)}', va='center', fontweight='bold')
         
         st.pyplot(fig)
-
-        # =============================================================================
-        # ANÁLISE DE INCERTEZA (MONTE CARLO) - MANTIDA COMO ORIGINAL
-        # =============================================================================
         
-        # Análise de Incerteza (Monte Carlo) - PROPOSTA DA TESE
         st.subheader("🎲 Análise de Incerteza (Monte Carlo) - Proposta da Tese")
         
         def gerar_parametros_mc_tese(n):
@@ -1094,7 +906,6 @@ if st.session_state.get('run_simulation', False):
         results_mc_tese = []
         for i in range(n_simulations):
             params_tese = [umidade_vals[i], temp_vals[i], doc_vals[i]]
-            # Reutilizar função original para Monte Carlo
             ch4_aterro, n2o_aterro = calcular_emissoes_aterro(params_tese, k_ano)
             ch4_vermi, n2o_vermi = calcular_emissoes_vermi(params_tese)
             
@@ -1121,7 +932,6 @@ if st.session_state.get('run_simulation', False):
         ax.xaxis.set_major_formatter(br_formatter)
         st.pyplot(fig)
 
-        # Análise de Incerteza (Monte Carlo) - CENÁRIO UNFCCC
         st.subheader("🎲 Análise de Incerteza (Monte Carlo) - Cenário UNFCCC")
         
         def gerar_parametros_mc_unfccc(n):
@@ -1137,7 +947,6 @@ if st.session_state.get('run_simulation', False):
         results_mc_unfccc = []
         for i in range(n_simulations):
             params_unfccc = [umidade_vals[i], temp_vals[i], doc_vals[i]]
-            # Reutilizar função original para Monte Carlo
             ch4_aterro, n2o_aterro = calcular_emissoes_aterro(params_unfccc, k_ano)
             ch4_compost, n2o_compost = calcular_emissoes_compostagem(params_unfccc, dias_simulacao=dias, dias_compostagem=50)
             
@@ -1164,26 +973,20 @@ if st.session_state.get('run_simulation', False):
         ax.xaxis.set_major_formatter(br_formatter)
         st.pyplot(fig)
 
-        # Análise Estatística de Comparação
         st.subheader("📊 Análise Estatística de Comparação")
         
-        # Teste de normalidade para as diferenças
         diferencas = results_array_tese - results_array_unfccc
         _, p_valor_normalidade_diff = stats.normaltest(diferencas)
         st.write(f"Teste de normalidade das diferenças (p-value): **{formatar_br_dec(p_valor_normalidade_diff, 5)}**")
 
-        # Teste T pareado
         ttest_pareado, p_ttest_pareado = stats.ttest_rel(results_array_tese, results_array_unfccc)
         st.write(f"Teste T pareado: Estatística t = **{formatar_br_dec(ttest_pareado, 5)}**, P-valor = **{formatar_br_dec(p_ttest_pareado, 5)}**")
 
-        # Teste de Wilcoxon para amostras pareadas
         wilcoxon_stat, p_wilcoxon = stats.wilcoxon(results_array_tese, results_array_unfccc)
         st.write(f"Teste de Wilcoxon (pareado): Estatística = **{formatar_br_dec(wilcoxon_stat, 5)}**, P-valor = **{formatar_br_dec(p_wilcoxon, 5)}**")
 
-        # Tabela de resultados anuais - Proposta da Tese
         st.subheader("📋 Resultados Anuais - Proposta da Tese")
 
-        # Criar uma cópia para formatação
         df_anual_formatado = df_anual_revisado.copy()
         for col in df_anual_formatado.columns:
             if col != 'Year':
@@ -1191,10 +994,8 @@ if st.session_state.get('run_simulation', False):
 
         st.dataframe(df_anual_formatado)
 
-        # Tabela de resultados anuais - Metodologia UNFCCC
         st.subheader("📋 Resultados Anuais - Metodologia UNFCCC")
 
-        # Criar uma cópia para formatação
         df_comp_formatado = df_comp_anual_revisado.copy()
         for col in df_comp_formatado.columns:
             if col != 'Year':
@@ -1205,10 +1006,8 @@ if st.session_state.get('run_simulation', False):
 else:
     st.info("💡 Ajuste os parâmetros na barra lateral e clique em 'Executar Simulação' para ver os resultados.")
 
-# Rodapé
 st.markdown("---")
 st.markdown("""
-
 **📚 Referências por Cenário:**
 
 **Cenário de Baseline (Aterro Sanitário):**
