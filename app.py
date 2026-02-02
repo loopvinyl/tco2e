@@ -17,7 +17,7 @@ from SALib.analyze.sobol import analyze
 np.random.seed(50)  # Garante reprodutibilidade
 
 # Configurações iniciais
-st.set_page_config(page_title="Simulador de Emissões CO₂eq e Crédtios de Carbono", layout="wide")
+st.set_page_config(page_title="Simulador de Emissões de tCO₂eq e Cálculo de Créditos de Carbono com Análise de Sensibilidade Global", layout="wide")
 warnings.filterwarnings("ignore", category=FutureWarning)
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', None)
@@ -331,7 +331,7 @@ def br_format(x, pos):
     return f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 # Título do aplicativo
-st.title("Simulador de Emissões de tCO₂eq e Créditos de Carbono")
+st.title("Simulador de Emissões de tCO₂eq e Cálculo de Créditos de Carbono com Análise de Sensibilidade Global")
 st.markdown("""
 Esta ferramenta projeta os Créditos de Carbono ao calcular as emissões de gases de efeito estufa para dois contextos de gestão de resíduos
 """)
