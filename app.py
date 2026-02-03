@@ -14,6 +14,9 @@ from matplotlib.ticker import FuncFormatter
 from SALib.sample.sobol import sample
 from SALib.analyze.sobol import analyze
 
+# =============================================================================
+# SEED FIXO PARA REPRODUTIBILIDADE - APLICADO NO INÍCIO DO SCRIPT
+# =============================================================================
 np.random.seed(50)
 
 st.set_page_config(page_title="Simulador de Emissões de tCO₂eq e Cálculo de Créditos de Carbono com Análise de Sensibilidade Global", layout="wide")
@@ -24,6 +27,10 @@ np.seterr(divide='ignore', invalid='ignore')
 plt.rcParams['figure.dpi'] = 150
 plt.rcParams['font.size'] = 10
 sns.set_style("whitegrid")
+
+# =============================================================================
+# FUNÇÕES DE COTAÇÃO AUTOMÁTICA DO CARBONO E CÂMBIO
+# =============================================================================
 
 def obter_cotacao_carbono_investing():
     try:
@@ -205,6 +212,10 @@ def exibir_cotacao_carbono():
         - Conversão para Real utilizando câmbio comercial
         """)
 
+# =============================================================================
+# INICIALIZAÇÃO DA SESSION STATE
+# =============================================================================
+
 def inicializar_session_state():
     if 'preco_carbono' not in st.session_state:
         preco_carbono, moeda, contrato_info, sucesso, fonte = obter_cotacao_carbono()
@@ -231,6 +242,10 @@ def inicializar_session_state():
         st.session_state.k_ano = 0.06
 
 inicializar_session_state()
+
+# =============================================================================
+# FUNÇÕES DE FORMATAÇÃO
+# =============================================================================
 
 def formatar_br(numero):
     if pd.isna(numero):
@@ -259,6 +274,10 @@ def br_format(x, pos):
         return f"{x:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
     return f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+# =============================================================================
+# INTERFACE PRINCIPAL
+# =============================================================================
 
 st.title("Simulador de Emissões de tCO₂eq e Cálculo de Créditos de Carbono com Análise de Sensibilidade Global")
 st.markdown("Esta ferramenta projeta os Créditos de Carbono ao calcular as emissões de gases de efeito estufa para dois contextos de gestão de resíduos")
@@ -334,6 +353,10 @@ with st.sidebar:
     
     if st.button("🚀 Executar Simulação", type="primary"):
         st.session_state.run_simulation = True
+
+# =============================================================================
+# PARÂMETROS FIXOS DO MODELO
+# =============================================================================
 
 DOCf_val = 0.0147 * T + 0.28
 MCF = 1
@@ -434,6 +457,10 @@ PERFIL_N2O_THERMO /= PERFIL_N2O_THERMO.sum()
 
 massa_exposta_kg = 100
 h_exposta = 8
+
+# =============================================================================
+# FUNÇÕES DE CÁLCULO DE EMISSÕES
+# =============================================================================
 
 def ajustar_emissoes_pre_descarte(O2_concentracao):
     ch4_ajustado = CH4_pre_descarte_g_por_kg_dia
@@ -537,6 +564,10 @@ def calcular_emissoes_compostagem(params, dias_simulacao=dias, dias_compostagem=
 
     return emissoes_CH4, emissoes_N2O
 
+# =============================================================================
+# FUNÇÕES PARA ANÁLISE SOBOL COM SEED FIXO
+# =============================================================================
+
 def executar_simulacao_completa_sobol(params_sobol):
     k_ano_sobol, T_sobol, DOC_sobol = params_sobol
     
@@ -564,6 +595,10 @@ def executar_simulacao_unfccc_sobol(params_sobol):
 
     reducao_tco2eq = total_aterro_tco2eq.sum() - total_compost_tco2eq.sum()
     return reducao_tco2eq
+
+# =============================================================================
+# EXECUÇÃO DA SIMULAÇÃO
+# =============================================================================
 
 if st.session_state.get('run_simulation', False):
     with st.spinner('Executando simulação...'):
@@ -630,6 +665,10 @@ if st.session_state.get('run_simulation', False):
         df_comp_anual_revisado['Emission reductions (t CO₂eq)'] = df_comp_anual_revisado['Baseline emissions (t CO₂eq)'] - df_comp_anual_revisado['Total_Compost_tCO2eq_dia']
         df_comp_anual_revisado['Cumulative reduction (t CO₂eq)'] = df_comp_anual_revisado['Emission reductions (t CO₂eq)'].cumsum()
         df_comp_anual_revisado.rename(columns={'Total_Compost_tCO2eq_dia': 'Project emissions (t CO₂eq)'}, inplace=True)
+
+        # =============================================================================
+        # EXIBIÇÃO DOS RESULTADOS
+        # =============================================================================
 
         st.header("📈 Resultados da Simulação")
         
@@ -804,11 +843,16 @@ if st.session_state.get('run_simulation', False):
         ax.yaxis.set_major_formatter(br_formatter)
 
         st.pyplot(fig)
+
+        # =============================================================================
+        # ANÁLISE DE SENSIBILIDADE GLOBAL (SOBOL) COM SEED FIXO
+        # =============================================================================
         
         st.subheader("🎯 Análise de Sensibilidade Global (Sobol) - Proposta da Tese")
         st.info("**Parâmetros variados na análise:** Taxa de Decaimento (k), Temperatura (T), DOC")
         br_formatter_sobol = FuncFormatter(br_format)
 
+        # GARANTIR SEED 50 PARA REPRODUCIBILIDADE
         np.random.seed(50)  
         
         problem_tese = {
@@ -821,7 +865,8 @@ if st.session_state.get('run_simulation', False):
             ]
         }
 
-        param_values_tese = sample(problem_tese, n_samples)
+        # ADICIONAR SEED=50 NA AMOSTRAGEM SOBOL
+        param_values_tese = sample(problem_tese, n_samples, seed=50)
         results_tese = Parallel(n_jobs=-1)(delayed(executar_simulacao_completa_sobol)(params) for params in param_values_tese)
         Si_tese = analyze(problem_tese, np.array(results_tese), print_to_console=False)
         
@@ -854,6 +899,7 @@ if st.session_state.get('run_simulation', False):
         st.subheader("🎯 Análise de Sensibilidade Global (Sobol) - Cenário UNFCCC")
         st.info("**Parâmetros variados na análise:** Taxa de Decaimento (k), Temperatura (T), DOC")
 
+        # GARANTIR SEED 50 PARA REPRODUCIBILIDADE - ADICIONADO
         np.random.seed(50)
         
         problem_unfccc = {
@@ -866,7 +912,8 @@ if st.session_state.get('run_simulation', False):
             ]
         }
 
-        param_values_unfccc = sample(problem_unfccc, n_samples)
+        # ADICIONAR SEED=50 NA AMOSTRAGEM SOBOL
+        param_values_unfccc = sample(problem_unfccc, n_samples, seed=50)
         results_unfccc = Parallel(n_jobs=-1)(delayed(executar_simulacao_unfccc_sobol)(params) for params in param_values_unfccc)
         Si_unfccc = analyze(problem_unfccc, np.array(results_unfccc), print_to_console=False)
         
@@ -890,10 +937,15 @@ if st.session_state.get('run_simulation', False):
             ax.text(st_value, i, f' {formatar_br(st_value)}', va='center', fontweight='bold')
         
         st.pyplot(fig)
+
+        # =============================================================================
+        # ANÁLISE DE INCERTEZA (MONTE CARLO) COM SEED FIXO
+        # =============================================================================
         
         st.subheader("🎲 Análise de Incerteza (Monte Carlo) - Proposta da Tese")
         
         def gerar_parametros_mc_tese(n):
+            # GARANTIR SEED 50 PARA REPRODUCIBILIDADE
             np.random.seed(50)
             umidade_vals = np.random.uniform(0.75, 0.90, n)
             temp_vals = np.random.normal(25, 3, n)
@@ -935,6 +987,7 @@ if st.session_state.get('run_simulation', False):
         st.subheader("🎲 Análise de Incerteza (Monte Carlo) - Cenário UNFCCC")
         
         def gerar_parametros_mc_unfccc(n):
+            # GARANTIR SEED 50 PARA REPRODUCIBILIDADE
             np.random.seed(50)
             umidade_vals = np.random.uniform(0.75, 0.90, n)
             temp_vals = np.random.normal(25, 3, n)
@@ -1005,6 +1058,10 @@ if st.session_state.get('run_simulation', False):
 
 else:
     st.info("💡 Ajuste os parâmetros na barra lateral e clique em 'Executar Simulação' para ver os resultados.")
+
+# =============================================================================
+# RODAPÉ COM REFERÊNCIAS
+# =============================================================================
 
 st.markdown("---")
 st.markdown("""
