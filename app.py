@@ -14,9 +14,6 @@ from matplotlib.ticker import FuncFormatter
 from SALib.sample.sobol import sample
 from SALib.analyze.sobol import analyze
 
-# =============================================================================
-# SEED FIXO PARA REPRODUTIBILIDADE - APLICADO NO INÍCIO DO SCRIPT
-# =============================================================================
 np.random.seed(50)
 
 st.set_page_config(page_title="Simulador de Emissões de tCO₂eq e Cálculo de Créditos de Carbono com Análise de Sensibilidade Global", layout="wide")
@@ -28,47 +25,25 @@ plt.rcParams['figure.dpi'] = 150
 plt.rcParams['font.size'] = 10
 sns.set_style("whitegrid")
 
-# =============================================================================
-# CLASSE GHGEmissionCalculator (DO GOOGLE COLAB)
-# =============================================================================
-
 class GHGEmissionCalculator:
-    """Main calculator for GHG emissions from waste management"""
-    
     def __init__(self):
-        # Waste characterization (Yang et al., 2017)
-        self.TOC = 0.436  # kg C/kg wet waste
-        self.TN = 0.0142  # kg N/kg wet waste
-        
-        # Composting emission fractions (Yang et al., 2017)
-        self.f_CH4_vermi = 0.0013   # 0.13% of TOC for vermicomposting
-        self.f_N2O_vermi = 0.0092   # 0.92% of TN for vermicomposting
-        self.f_CH4_thermo = 0.0060  # 0.60% of TOC for thermophilic
-        self.f_N2O_thermo = 0.0196  # 1.96% of TN for thermophilic
-        
-        # Composting period (days)
+        self.TOC = 0.436
+        self.TN = 0.0142
+        self.f_CH4_vermi = 0.0013
+        self.f_N2O_vermi = 0.0092
+        self.f_CH4_thermo = 0.0060
+        self.f_N2O_thermo = 0.0196
         self.COMPOSTING_DAYS = 50
-        
-        # Global Warming Potentials (IPCC AR6, 2021 - 20-year)
         self.GWP_CH4_20 = 79.7
         self.GWP_N2O_20 = 273
-        
-        # Landfill parameters (IPCC 2006)
-        self.MCF = 1.0  # Managed landfill
-        self.F = 0.5    # CH4 fraction in landfill gas
-        self.OX = 0.1   # Oxidation factor
-        self.Ri = 0.0   # No recovery inhibition
-        
-        # Load emission profiles
+        self.MCF = 1.0
+        self.F = 0.5
+        self.OX = 0.1
+        self.Ri = 0.0
         self._load_emission_profiles()
-        
-        # Pre-disposal emissions (Feng et al., 2020)
         self._setup_pre_disposal_emissions()
     
     def _load_emission_profiles(self):
-        """Load and normalize emission profiles from Appendix A"""
-        
-        # CH4 profile for vermicomposting (Appendix A.4.1)
         self.profile_ch4_vermi = np.array([
             0.02, 0.02, 0.02, 0.03, 0.03, 0.04, 0.04, 0.05, 0.05, 0.06,
             0.07, 0.08, 0.09, 0.10, 0.09, 0.08, 0.07, 0.06, 0.05, 0.04,
@@ -78,7 +53,6 @@ class GHGEmissionCalculator:
         ])
         self.profile_ch4_vermi /= self.profile_ch4_vermi.sum()
         
-        # N2O profile for vermicomposting (Appendix A.4.2)
         self.profile_n2o_vermi = np.array([
             0.15, 0.10, 0.20, 0.05, 0.03, 0.03, 0.03, 0.04, 0.05, 0.06,
             0.08, 0.09, 0.10, 0.08, 0.07, 0.06, 0.05, 0.04, 0.03, 0.02,
@@ -88,10 +62,8 @@ class GHGEmissionCalculator:
         ])
         self.profile_n2o_vermi /= self.profile_n2o_vermi.sum()
         
-        # CH4 profile for thermophilic composting (same as vermicomposting, Appendix A.4.3)
         self.profile_ch4_thermo = self.profile_ch4_vermi.copy()
         
-        # N2O profile for thermophilic composting (Appendix A.4.4)
         self.profile_n2o_thermo = np.array([
             0.10, 0.08, 0.15, 0.05, 0.03, 0.04, 0.05, 0.07, 0.10, 0.12,
             0.15, 0.18, 0.20, 0.18, 0.15, 0.12, 0.10, 0.08, 0.06, 0.05,
@@ -101,75 +73,52 @@ class GHGEmissionCalculator:
         ])
         self.profile_n2o_thermo /= self.profile_n2o_thermo.sum()
         
-        # N2O profile for landfill (Appendix A.5)
         self.profile_n2o_landfill = {1: 0.10, 2: 0.30, 3: 0.40, 4: 0.15, 5: 0.05}
     
     def _setup_pre_disposal_emissions(self):
-        """Setup pre-disposal emission factors (Feng et al., 2020)"""
-        # CH4 pre-disposal
         CH4_pre_ugC_per_kg_h = 2.78
         self.CH4_pre_kg_per_kg_day = CH4_pre_ugC_per_kg_h * (16/12) * 24 / 1_000_000
         
-        # N2O pre-disposal
         N2O_pre_mgN_per_kg = 20.26
         N2O_pre_mgN_per_kg_day = N2O_pre_mgN_per_kg / 3
         self.N2O_pre_kg_per_kg_day = N2O_pre_mgN_per_kg_day * (44/28) / 1_000_000
         
-        # Distribution profile for N2O pre-disposal
         self.profile_n2o_pre = {1: 0.8623, 2: 0.10, 3: 0.0377}
     
-    def calculate_landfill_emissions(self, waste_kg_day, k_year, temperature_C, 
-                                    doc_fraction, moisture_fraction, years=20):
-        """
-        Calculate landfill emissions using IPCC FOD method
-        """
+    def calculate_landfill_emissions(self, waste_kg_day, k_year, temperature_C, doc_fraction, moisture_fraction, years=20):
         days = years * 365
-        
-        # Calculate DOCf
         docf = 0.0147 * temperature_C + 0.28
-        
-        # CH4 potential per kg waste
-        ch4_potential_per_kg = (doc_fraction * docf * self.MCF * self.F * 
-                               (16/12) * (1 - self.Ri) * (1 - self.OX))
-        
+        ch4_potential_per_kg = (doc_fraction * docf * self.MCF * self.F * (16/12) * (1 - self.Ri) * (1 - self.OX))
         ch4_potential_daily = waste_kg_day * ch4_potential_per_kg
         
-        # First-order decay distribution
         t = np.arange(1, days + 1, dtype=float)
         kernel_ch4 = np.exp(-k_year * (t - 1) / 365.0) - np.exp(-k_year * t / 365.0)
         daily_inputs = np.ones(days, dtype=float)
         ch4_emissions = fftconvolve(daily_inputs, kernel_ch4, mode='full')[:days]
         ch4_emissions *= ch4_potential_daily
         
-        # N2O emissions (Wang et al., 2017)
-        exposed_mass = 100  # kg (assumed for calculation)
+        exposed_mass = 100
         exposed_hours = 8
-        
         opening_factor = (exposed_mass / waste_kg_day) * (exposed_hours / 24)
         opening_factor = np.clip(opening_factor, 0.0, 1.0)
         
-        E_open = 1.91  # g N/kg waste
-        E_closed = 2.15  # g N/kg waste
+        E_open = 1.91
+        E_closed = 2.15
         E_avg = opening_factor * E_open + (1 - opening_factor) * E_closed
         
-        # Adjust for moisture
         moisture_factor = (1 - moisture_fraction) / (1 - 0.55)
         E_avg_adjusted = E_avg * moisture_factor
         
-        # Daily N2O emission
         daily_n2o_kg = (E_avg_adjusted * (44/28) / 1_000_000) * waste_kg_day
         
-        # Distribute over 5 days
         kernel_n2o = np.array([self.profile_n2o_landfill.get(d, 0) for d in range(1, 6)], dtype=float)
         n2o_emissions = fftconvolve(np.full(days, daily_n2o_kg), kernel_n2o, mode='full')[:days]
         
-        # Add pre-disposal emissions
         ch4_pre, n2o_pre = self._calculate_pre_disposal(waste_kg_day, days)
         
         return ch4_emissions + ch4_pre, n2o_emissions + n2o_pre
     
     def _calculate_pre_disposal(self, waste_kg_day, days):
-        """Calculate pre-disposal emissions"""
         ch4_emissions = np.full(days, waste_kg_day * self.CH4_pre_kg_per_kg_day)
         n2o_emissions = np.zeros(days)
         
@@ -182,23 +131,15 @@ class GHGEmissionCalculator:
         return ch4_emissions, n2o_emissions
     
     def calculate_vermicomposting_emissions(self, waste_kg_day, moisture_fraction, years=20):
-        """
-        Calculate vermicomposting emissions
-        """
         days = years * 365
         dry_fraction = 1 - moisture_fraction
         
-        # Emissions per batch
-        ch4_per_batch = (waste_kg_day * self.TOC * self.f_CH4_vermi * 
-                        (16/12) * dry_fraction)
-        n2o_per_batch = (waste_kg_day * self.TN * self.f_N2O_vermi * 
-                        (44/28) * dry_fraction)
+        ch4_per_batch = (waste_kg_day * self.TOC * self.f_CH4_vermi * (16/12) * dry_fraction)
+        n2o_per_batch = (waste_kg_day * self.TN * self.f_N2O_vermi * (44/28) * dry_fraction)
         
-        # Initialize arrays
         ch4_emissions = np.zeros(days)
         n2o_emissions = np.zeros(days)
         
-        # Distribute emissions over composting period
         for entry_day in range(days):
             for compost_day in range(self.COMPOSTING_DAYS):
                 emission_day = entry_day + compost_day
@@ -209,23 +150,15 @@ class GHGEmissionCalculator:
         return ch4_emissions, n2o_emissions
     
     def calculate_thermophilic_emissions(self, waste_kg_day, moisture_fraction, years=20):
-        """
-        Calculate thermophilic composting emissions
-        """
         days = years * 365
         dry_fraction = 1 - moisture_fraction
         
-        # Emissions per batch
-        ch4_per_batch = (waste_kg_day * self.TOC * self.f_CH4_thermo * 
-                        (16/12) * dry_fraction)
-        n2o_per_batch = (waste_kg_day * self.TN * self.f_N2O_thermo * 
-                        (44/28) * dry_fraction)
+        ch4_per_batch = (waste_kg_day * self.TOC * self.f_CH4_thermo * (16/12) * dry_fraction)
+        n2o_per_batch = (waste_kg_day * self.TN * self.f_N2O_thermo * (44/28) * dry_fraction)
         
-        # Initialize arrays
         ch4_emissions = np.zeros(days)
         n2o_emissions = np.zeros(days)
         
-        # Distribute emissions over composting period
         for entry_day in range(days):
             for compost_day in range(self.COMPOSTING_DAYS):
                 emission_day = entry_day + compost_day
@@ -235,12 +168,7 @@ class GHGEmissionCalculator:
         
         return ch4_emissions, n2o_emissions
     
-    def calculate_avoided_emissions(self, waste_kg_day, k_year, temperature_C, 
-                                   doc_fraction, moisture_fraction, years=20):
-        """
-        Calculate avoided emissions for both technologies
-        """
-        # Calculate all emissions
+    def calculate_avoided_emissions(self, waste_kg_day, k_year, temperature_C, doc_fraction, moisture_fraction, years=20):
         ch4_landfill, n2o_landfill = self.calculate_landfill_emissions(
             waste_kg_day, k_year, temperature_C, doc_fraction, moisture_fraction, years
         )
@@ -253,16 +181,13 @@ class GHGEmissionCalculator:
             waste_kg_day, moisture_fraction, years
         )
         
-        # Convert to CO2eq
         baseline_co2eq = (ch4_landfill * self.GWP_CH4_20 + n2o_landfill * self.GWP_N2O_20) / 1000
         vermi_co2eq = (ch4_vermi * self.GWP_CH4_20 + n2o_vermi * self.GWP_N2O_20) / 1000
         thermo_co2eq = (ch4_thermo * self.GWP_CH4_20 + n2o_thermo * self.GWP_N2O_20) / 1000
         
-        # Calculate avoided emissions
         avoided_vermi = baseline_co2eq.sum() - vermi_co2eq.sum()
         avoided_thermo = baseline_co2eq.sum() - thermo_co2eq.sum()
         
-        # Return results
         results = {
             'baseline': {
                 'ch4_kg': ch4_landfill.sum(),
@@ -293,10 +218,6 @@ class GHGEmissionCalculator:
         }
         
         return results
-
-# =============================================================================
-# FUNÇÕES DE COTAÇÃO AUTOMÁTICA DO CARBONO E CÂMBIO
-# =============================================================================
 
 def obter_cotacao_carbono_investing():
     try:
@@ -478,10 +399,6 @@ def exibir_cotacao_carbono():
         - Conversão para Real utilizando câmbio comercial
         """)
 
-# =============================================================================
-# INICIALIZAÇÃO DA SESSION STATE
-# =============================================================================
-
 def inicializar_session_state():
     if 'preco_carbono' not in st.session_state:
         preco_carbono, moeda, contrato_info, sucesso, fonte = obter_cotacao_carbono()
@@ -508,10 +425,6 @@ def inicializar_session_state():
         st.session_state.k_ano = 0.06
 
 inicializar_session_state()
-
-# =============================================================================
-# FUNÇÕES DE FORMATAÇÃO
-# =============================================================================
 
 def formatar_br(numero):
     if pd.isna(numero):
@@ -541,10 +454,6 @@ def br_format(x, pos):
     
     return f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-# =============================================================================
-# INTERFACE PRINCIPAL
-# =============================================================================
-
 st.title("Simulador de Emissões de tCO₂eq e Cálculo de Créditos de Carbono com Análise de Sensibilidade Global")
 st.markdown("Esta ferramenta projeta os Créditos de Carbono ao calcular as emissões de gases de efeito estufa para dois contextos de gestão de resíduos")
 
@@ -553,8 +462,7 @@ exibir_cotacao_carbono()
 with st.sidebar:
     st.header("⚙️ Parâmetros de Entrada")
     
-    residuos_kg_dia = st.slider("Quantidade de resíduos (kg/dia)", 
-                               min_value=10, max_value=1000, value=100, step=10)
+    residuos_kg_dia = st.slider("Quantidade de resíduos (kg/dia)", min_value=10, max_value=1000, value=100, step=10)
     
     st.subheader("📊 Parâmetros da Análise Sobol")
     st.info("Estes são os parâmetros variados na análise de sensibilidade Sobol")
@@ -578,13 +486,11 @@ with st.sidebar:
     st.write(f"**Valor selecionado:** {formatar_br(k_ano)} ano⁻¹")
     
     st.markdown("**2. Temperatura Média**")
-    T = st.slider("Temperatura média (°C)", 
-                 min_value=20, max_value=40, value=25, step=1)
+    T = st.slider("Temperatura média (°C)", min_value=20, max_value=40, value=25, step=1)
     st.write(f"**Valor selecionado:** {formatar_br(T)} °C")
     
     st.markdown("**3. Carbono Orgânico Degradável**")
-    DOC = st.slider("DOC (fração)", 
-                   min_value=0.10, max_value=0.25, value=0.15, step=0.01)
+    DOC = st.slider("DOC (fração)", min_value=0.10, max_value=0.25, value=0.15, step=0.01)
     st.write(f"**Valor selecionado:** {formatar_br(DOC)}")
     
     st.markdown("**4. Umidade do Resíduo**")
@@ -594,7 +500,7 @@ with st.sidebar:
     
     with st.expander("ℹ️ Sobre os parâmetros da análise Sobol"):
         st.markdown("""
-        **📊 Parámetros variados na análise de sensibilidade Sobol:**
+        **📊 Parâmetros variados na análise de sensibilidade Sobol:**
         
         1. **Taxa de decaimento (k):** 0.06 a 0.40 ano⁻¹
            - Controla a velocidade de degradação no aterro
@@ -620,21 +526,13 @@ with st.sidebar:
     if st.button("🚀 Executar Simulação", type="primary"):
         st.session_state.run_simulation = True
 
-# =============================================================================
-# FUNÇÕES DE ANÁLISE SOBOL (ATUALIZADAS)
-# =============================================================================
-
 def executar_simulacao_completa_sobol(params_sobol):
-    """Model function for vermicomposting avoided emissions - IDÊNTICO AO GOOGLE COLAB"""
     k_ano_sobol, T_sobol, DOC_sobol = params_sobol
     
-    # Garantir seed 50 para reprodutibilidade
     np.random.seed(50)
     
-    # Inicializar calculadora com os parâmetros
     calculator = GHGEmissionCalculator()
     
-    # Calcular emissões evitadas
     results = calculator.calculate_avoided_emissions(
         waste_kg_day=residuos_kg_dia,
         k_year=k_ano_sobol,
@@ -647,16 +545,12 @@ def executar_simulacao_completa_sobol(params_sobol):
     return results['vermicomposting']['avoided_co2eq_t']
 
 def executar_simulacao_unfccc_sobol(params_sobol):
-    """Model function for thermophilic avoided emissions - IDÊNTICO AO GOOGLE COLAB"""
     k_ano_sobol, T_sobol, DOC_sobol = params_sobol
     
-    # Garantir seed 50 para reprodutibilidade
     np.random.seed(50)
     
-    # Inicializar calculadora com os parâmetros
     calculator = GHGEmissionCalculator()
     
-    # Calcular emissões evitadas
     results = calculator.calculate_avoided_emissions(
         waste_kg_day=residuos_kg_dia,
         k_year=k_ano_sobol,
@@ -668,13 +562,7 @@ def executar_simulacao_unfccc_sobol(params_sobol):
     
     return results['thermophilic']['avoided_co2eq_t']
 
-# =============================================================================
-# FUNÇÕES DE MONTE CARLO (ATUALIZADAS)
-# =============================================================================
-
 def gerar_parametros_mc(n):
-    """Gerar parâmetros para Monte Carlo - IDÊNTICO AO GOOGLE COLAB"""
-    # GARANTIR SEED 50 PARA REPRODUCIBILIDADE
     np.random.seed(50)
     umidade_vals = np.random.uniform(0.75, 0.90, n)
     temp_vals = np.random.normal(25, 3, n)
@@ -682,17 +570,11 @@ def gerar_parametros_mc(n):
     
     return umidade_vals, temp_vals, doc_vals
 
-# =============================================================================
-# EXECUÇÃO DA SIMULAÇÃO
-# =============================================================================
-
 if st.session_state.get('run_simulation', False):
     with st.spinner('Executando simulação...'):
-        # Inicializar a calculadora
         calculator = GHGEmissionCalculator()
         k_ano = st.session_state.k_ano
         
-        # Calcular resultados principais
         results = calculator.calculate_avoided_emissions(
             waste_kg_day=residuos_kg_dia,
             k_year=k_ano,
@@ -702,11 +584,9 @@ if st.session_state.get('run_simulation', False):
             years=anos_simulacao
         )
         
-        # Criar DataFrame para visualização temporal
         dias = anos_simulacao * 365
         datas = pd.date_range(start=datetime.now(), periods=dias, freq='D')
         
-        # Calcular emissões diárias para visualização
         ch4_aterro_dia, n2o_aterro_dia = calculator.calculate_landfill_emissions(
             residuos_kg_dia, k_ano, T, DOC, umidade, anos_simulacao
         )
@@ -715,7 +595,6 @@ if st.session_state.get('run_simulation', False):
             residuos_kg_dia, umidade, anos_simulacao
         )
         
-        # Criar DataFrame para visualização
         df = pd.DataFrame({
             'Data': datas,
             'CH4_Aterro_kg_dia': ch4_aterro_dia,
@@ -724,7 +603,6 @@ if st.session_state.get('run_simulation', False):
             'N2O_Vermi_kg_dia': n2o_vermi_dia,
         })
         
-        # Converter para tCO₂eq
         for gas in ['CH4_Aterro', 'N2O_Aterro', 'CH4_Vermi', 'N2O_Vermi']:
             df[f'{gas}_tCO2eq'] = df[f'{gas}_kg_dia'] * (calculator.GWP_CH4_20 if 'CH4' in gas else calculator.GWP_N2O_20) / 1000
         
@@ -749,12 +627,10 @@ if st.session_state.get('run_simulation', False):
             'Total_Vermi_tCO2eq_dia': 'Project emissions (t CO₂eq)',
         }, inplace=True)
         
-        # Calcular emissões termofílicas para UNFCCC
         ch4_compost_dia, n2o_compost_dia = calculator.calculate_thermophilic_emissions(
             residuos_kg_dia, umidade, anos_simulacao
         )
         
-        # Converter para tCO₂eq
         ch4_compost_unfccc_tco2eq = ch4_compost_dia * calculator.GWP_CH4_20 / 1000
         n2o_compost_unfccc_tco2eq = n2o_compost_dia * calculator.GWP_N2O_20 / 1000
         total_compost_unfccc_tco2eq_dia = ch4_compost_unfccc_tco2eq + n2o_compost_unfccc_tco2eq
@@ -776,10 +652,6 @@ if st.session_state.get('run_simulation', False):
         df_comp_anual_revisado['Emission reductions (t CO₂eq)'] = df_comp_anual_revisado['Baseline emissions (t CO₂eq)'] - df_comp_anual_revisado['Total_Compost_tCO2eq_dia']
         df_comp_anual_revisado['Cumulative reduction (t CO₂eq)'] = df_comp_anual_revisado['Emission reductions (t CO₂eq)'].cumsum()
         df_comp_anual_revisado.rename(columns={'Total_Compost_tCO2eq_dia': 'Project emissions (t CO₂eq)'}, inplace=True)
-        
-        # =============================================================================
-        # EXIBIÇÃO DOS RESULTADOS
-        # =============================================================================
         
         st.header("📈 Resultados da Simulação")
         
@@ -956,28 +828,22 @@ if st.session_state.get('run_simulation', False):
 
         st.pyplot(fig)
 
-        # =============================================================================
-        # ANÁLISE DE SENSIBILIDADE GLOBAL (SOBOL) COM SEED FIXO
-        # =============================================================================
-        
         st.subheader("🎯 Análise de Sensibilidade Global (Sobol) - Proposta da Tese")
         st.info("**Parâmetros variados na análise:** Taxa de Decaimento (k), Temperatura (T), DOC")
         br_formatter_sobol = FuncFormatter(br_format)
 
-        # GARANTIR SEED 50 PARA REPRODUCIBILIDADE
         np.random.seed(50)  
         
         problem_tese = {
             'num_vars': 3,
             'names': ['taxa_decaimento', 'T', 'DOC'],
             'bounds': [
-                [0.06, 0.40],    # k - same as Google Colab
-                [20.0, 40.0],    # T: 20-40°C (CORRETO - igual ao Google Colab)
-                [0.10, 0.25],    # DOC: 0.10-0.25 (CORRETO - igual ao Google Colab)
+                [0.06, 0.40],
+                [20.0, 40.0],
+                [0.10, 0.25],
             ]
         }
 
-        # ADICIONAR SEED=50 NA AMOSTRAGEM SOBOL
         param_values_tese = sample(problem_tese, n_samples, seed=50)
         results_tese = Parallel(n_jobs=-1)(delayed(executar_simulacao_completa_sobol)(params) for params in param_values_tese)
         Si_tese = analyze(problem_tese, np.array(results_tese), print_to_console=False)
@@ -1008,7 +874,6 @@ if st.session_state.get('run_simulation', False):
         
         st.pyplot(fig)
         
-        # Mostrar valores numéricos
         st.subheader("📊 Valores de Sensibilidade - Proposta da Tese")
         st.dataframe(sensibilidade_df_tese.style.format({
             'S1': '{:.4f}',
@@ -1018,20 +883,18 @@ if st.session_state.get('run_simulation', False):
         st.subheader("🎯 Análise de Sensibilidade Global (Sobol) - Cenário UNFCCC")
         st.info("**Parâmetros variados na análise:** Taxa de Decaimento (k), Temperatura (T), DOC")
 
-        # GARANTIR SEED 50 PARA REPRODUCIBILIDADE
         np.random.seed(50)
         
         problem_unfccc = {
             'num_vars': 3,
             'names': ['taxa_decaimento', 'T', 'DOC'],
             'bounds': [
-                [0.06, 0.40],    # k - same as Google Colab
-                [20.0, 40.0],    # T: 20-40°C (CORRETO - igual ao Google Colab)
-                [0.10, 0.25],    # DOC: 0.10-0.25 (CORRETO - igual ao Google Colab)
+                [0.06, 0.40],
+                [20.0, 40.0],
+                [0.10, 0.25],
             ]
         }
 
-        # ADICIONAR SEED=50 NA AMOSTRAGEM SOBOL
         param_values_unfccc = sample(problem_unfccc, n_samples, seed=50)
         results_unfccc = Parallel(n_jobs=-1)(delayed(executar_simulacao_unfccc_sobol)(params) for params in param_values_unfccc)
         Si_unfccc = analyze(problem_unfccc, np.array(results_unfccc), print_to_console=False)
@@ -1057,20 +920,14 @@ if st.session_state.get('run_simulation', False):
         
         st.pyplot(fig)
         
-        # Mostrar valores numéricos
         st.subheader("📊 Valores de Sensibilidade - Cenário UNFCCC")
         st.dataframe(sensibilidade_df_unfccc.style.format({
             'S1': '{:.4f}',
             'ST': '{:.4f}'
         }))
 
-        # =============================================================================
-        # ANÁLISE DE INCERTEZA (MONTE CARLO) COM SEED FIXO
-        # =============================================================================
-        
         st.subheader("🎲 Análise de Incerteza (Monte Carlo) - Proposta da Tese")
         
-        # Gerar parâmetros Monte Carlo
         umidade_vals, temp_vals, doc_vals = gerar_parametros_mc(n_simulations)
         
         results_mc_tese = []
@@ -1167,10 +1024,6 @@ if st.session_state.get('run_simulation', False):
 
 else:
     st.info("💡 Ajuste os parâmetros na barra lateral e clique em 'Executar Simulação' para ver os resultados.")
-
-# =============================================================================
-# RODAPÉ COM REFERÊNCIAS
-# =============================================================================
 
 st.markdown("---")
 st.markdown("""
