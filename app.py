@@ -1042,7 +1042,7 @@ st.markdown("""
 - Fatores de emissões: Yang et al. (2017)
 
 **⚠️ Nota de Reprodutibilidade:**
-- Todas as análises usam seed fixo (50) para garantir resultados idênticos ao Google Colab
+- Todas as análises usam seed fixo (50) para garantir resultados idênticos ao script testado no Google Colab
 - Ajustados os ranges de parâmetros para DOC (0.10-0.25) e Temperatura (20-40°C)
-- Métodos de cálculo idênticos aos do Google Colab
+- Métodos de cálculo idênticos aos do script testado no Google Colab
 """)
